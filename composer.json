@@ -1,0 +1,22 @@
+{
+  "name": "abmmhasan/benchmark",
+  "description": "Benchmarking library",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "abmmhasan",
+      "email": "abmmhasan346@gmail.com"
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "AbmmHasan\\Benchmark\\": "src/"
+    }
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "require": {
+    "php": ">=8.0"
+  }
+}
