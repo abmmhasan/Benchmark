@@ -32,6 +32,8 @@ class RequestBenchmark
     ];
 
     /**
+     * Set link & method for benchmark
+     *
      * @param string $link
      * @param string $method
      * @return static
@@ -52,6 +54,8 @@ class RequestBenchmark
     }
 
     /**
+     * Set passable headers
+     *
      * @param array $headers
      * @return static
      */
@@ -62,6 +66,8 @@ class RequestBenchmark
     }
 
     /**
+     * Set body
+     *
      * @param array|string $body
      * @return static
      */
@@ -72,6 +78,8 @@ class RequestBenchmark
     }
 
     /**
+     * Set expected status (the status return by the set endpoint)
+     *
      * @param int $status
      * @return static
      */
@@ -82,6 +90,8 @@ class RequestBenchmark
     }
 
     /**
+     * Set options for single thread request
+     *
      * @param int $numberOfRequests
      * @return static
      * @throws Exception
@@ -95,6 +105,8 @@ class RequestBenchmark
     }
 
     /**
+     * Set options for multi-threaded request
+     *
      * @param int $numberOfThreads
      * @param int $numberOfRequests
      * @param string $pipingType
@@ -125,6 +137,8 @@ class RequestBenchmark
     }
 
     /**
+     * Start benchmarking with configured options
+     *
      * @return array
      * @throws Exception
      */
@@ -133,7 +147,6 @@ class RequestBenchmark
         $startTime = microtime(true);
         $option = $this->prepareOption();
         $singleThread = $this->singleThreaded($option);
-        sleep(1);
         $multiThreaded = $this->multiThreaded($option);
         return [
             'method' => $this->method,
@@ -147,6 +160,8 @@ class RequestBenchmark
     }
 
     /**
+     * Multi-threaded request
+     *
      * @param $option
      * @return array
      * @throws Exception
@@ -167,6 +182,8 @@ class RequestBenchmark
     }
 
     /**
+     * Single-threaded request
+     *
      * @param $option
      * @return array
      * @throws Exception
@@ -178,6 +195,11 @@ class RequestBenchmark
         return $this->seriesRequest($curlHandle);
     }
 
+    /**
+     * Get response from multi-threaded request
+     *
+     * @return array
+     */
     private function getThreadedResponse(): array
     {
         $results = [];
@@ -191,6 +213,8 @@ class RequestBenchmark
     }
 
     /**
+     * Perform multi-threaded request
+     *
      * @return float
      */
     private function threadedRequest(): float
@@ -210,6 +234,8 @@ class RequestBenchmark
     }
 
     /**
+     * Setup required options for multi-threading
+     *
      * @param array $options
      * @return void
      */
@@ -230,6 +256,8 @@ class RequestBenchmark
     }
 
     /**
+     * Setup & execute single-threaded requests
+     *
      * @param $handle
      * @return array
      * @throws Exception
@@ -259,6 +287,8 @@ class RequestBenchmark
     }
 
     /**
+     * Execute curls
+     *
      * @param $handle
      * @return array
      */
@@ -278,6 +308,8 @@ class RequestBenchmark
     }
 
     /**
+     * Prepare required options
+     *
      * @return array
      */
     private function prepareOption(): array
@@ -297,7 +329,10 @@ class RequestBenchmark
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_CUSTOMREQUEST => $this->method
         ];
-        if ($this->method === 'POST' || $this->method === 'PUT' || $this->method === 'PATCH') {
+        if (
+            ($this->method === 'POST' || $this->method === 'PUT' || $this->method === 'PATCH') &&
+            !empty($this->body)
+        ) {
             $curlOption[CURLOPT_POSTFIELDS] = $this->body;
         }
         if (!empty($this->headers)) {
