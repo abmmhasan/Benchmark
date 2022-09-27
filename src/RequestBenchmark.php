@@ -152,9 +152,15 @@ class RequestBenchmark
             'method' => $this->method,
             'url' => $this->url,
             'expects' => $this->expect,
-            'singleThread' => $singleThread,
-            'multiThread' => $multiThreaded,
-            'score' => round($singleThread['req/s'] + $multiThreaded['req/s'], 5),
+            'threadDetails' => [
+                'single' => $singleThread,
+                'multiple' => $multiThreaded
+            ],
+            'score' => [
+                'single' => $singleThread['req/s'],
+                'multiple' => $multiThreaded['req/s'],
+                'total' => round($singleThread['req/s'] + $multiThreaded['req/s'], 5)
+            ],
             'took' => round(microtime(true) - $startTime, 5)
         ];
     }
