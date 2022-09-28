@@ -9,6 +9,7 @@ use InvalidArgumentException;
 class RequestBenchmark
 {
     private CurlMultiHandle $cmh;
+    private array $curlOptions = [];
     private array $headers = [];
     private ?string $body = null;
     private array $validMethods = [
@@ -22,13 +23,13 @@ class RequestBenchmark
     private int $expect = 200;
     private string $method = 'GET';
     private string $url;
-    private array $singleThreadConfiguration = [
-        'count' => 1000
-    ];
-    private array $multiThreadConfiguration = [
+    private array $requestConfiguration = [
         'threads' => 10,
         'count' => 1000,
         'piping' => 'optimal'
+    ];
+    private array $result = [
+        'error' => 'uninitialized'
     ];
 
     /**
@@ -44,11 +45,12 @@ class RequestBenchmark
         if (filter_var($link, FILTER_VALIDATE_URL) === false) {
             throw new InvalidArgumentException('Invalid URL');
         }
+        $method = strtoupper($method);
         if (!in_array($method, $this->validMethods)) {
             throw new Exception('Invalid HTTP method');
         }
 
-        $this->method = strtoupper($method);
+        $this->method = $method;
         $this->url = $link;
         return $this;
     }
@@ -90,46 +92,34 @@ class RequestBenchmark
     }
 
     /**
-     * Set options for single thread request
+     * Set options for user requests
      *
-     * @param int $numberOfRequests
-     * @return static
-     * @throws Exception
-     */
-    public function setSingleThreadOption(int $numberOfRequests = 1000): static
-    {
-        if ($numberOfRequests < 1) {
-            throw new Exception('Minimum required request count is 1!');
-        }
-        return $this;
-    }
-
-    /**
-     * Set options for multi-threaded request
-     *
-     * @param int $numberOfThreads
+     * @param int $numberOfUsers
      * @param int $numberOfRequests
      * @param string $pipingType
      * @return static
      * @throws Exception
      */
-    public function setMultiThreadOption(
-        int    $numberOfThreads = 10,
+    public function setUserOption(
+        int    $numberOfUsers = 10,
         int    $numberOfRequests = 1000,
         string $pipingType = 'optimal'
     ): static
     {
-        if ($numberOfThreads < 2) {
+        if ($numberOfUsers < 2) {
             throw new Exception('Minimum required thread count is 2!');
         }
-        if ($numberOfRequests < $numberOfThreads) {
+        if ($numberOfRequests < 100) {
+            throw new Exception('Request count should be greater than or equal to 100!');
+        }
+        if ($numberOfRequests < $numberOfUsers) {
             throw new Exception('Request count should be greater than or equal to given thread!');
         }
         if (!in_array($pipingType, ['optimal', 'max'])) {
             throw new Exception('Pipe: Invalid type!');
         }
-        $this->multiThreadConfiguration = [
-            'threads' => $numberOfThreads,
+        $this->requestConfiguration = [
+            'threads' => $numberOfUsers,
             'count' => $numberOfRequests,
             'piping' => $pipingType
         ];
@@ -137,36 +127,63 @@ class RequestBenchmark
     }
 
     /**
-     * Start benchmarking with configured options
+     * Set curl option (this will override curl settings except URL, Method, Header & Body)
      *
-     * @return array
-     * @throws Exception
+     * @param array $curlOptions
+     * @return static
      */
-    public function execute(): array
+    public function setCurlOption(array $curlOptions): static
     {
-        $startTime = microtime(true);
-        $option = $this->prepareOption();
-        $singleThread = $this->singleThreaded($option);
-        $multiThreaded = $this->multiThreaded($option);
-        return [
-            'method' => $this->method,
-            'url' => $this->url,
-            'expects' => $this->expect,
-            'threadDetails' => [
-                'single' => $singleThread,
-                'multiple' => $multiThreaded
-            ],
-            'score' => [
-                'single' => $singleThread['req/s'],
-                'multiple' => $multiThreaded['req/s'],
-                'total' => round($singleThread['req/s'] + $multiThreaded['req/s'], 5)
-            ],
-            'took' => round(microtime(true) - $startTime, 5)
-        ];
+        $this->curlOptions = $curlOptions;
+        return $this;
     }
 
     /**
-     * Multi-threaded request
+     * Start benchmarking with configured options
+     *
+     * @return static
+     * @throws Exception
+     */
+    public function start(): static
+    {
+        $this->result = [
+            'error' => 'unfinished'
+        ];
+        $startTime = microtime(true);
+        $option = $this->prepareOption();
+        $singleThreadReq = $this->singleThreaded($option);
+        $this->result = [
+            'req/s' => [
+                'singleUser' => $singleThreadReq['req/s'],
+                'multipleUsers' => $this->multiThreaded($option)['req/s']
+            ],
+            'responseDuration' => $singleThreadReq['avgDuration'],
+            'took' => round(microtime(true) - $startTime, 5)
+        ];
+        return $this;
+    }
+
+    /**
+     * Get any of the predefined variable
+     *
+     * @param string $key
+     * @return array|int|string|string[]|null
+     */
+    public function __get(string $key)
+    {
+        return match ($key) {
+            'result' => $this->result,
+            'headers' => $this->headers,
+            'body' => $this->body,
+            'method' => $this->method,
+            'url' => $this->url,
+            'expectedStatus' => $this->expect,
+            'configuration' => $this->requestConfiguration
+        };
+    }
+
+    /**
+     * Multiple user request
      *
      * @param $option
      * @return array
@@ -182,13 +199,12 @@ class RequestBenchmark
             );
         }
         return [
-            'req/s' => round($this->multiThreadConfiguration['count'] / $duration, 5),
-            'duration' => $duration
+            'req/s' => round($this->requestConfiguration['count'] / $duration, 5)
         ];
     }
 
     /**
-     * Single-threaded request
+     * Single user request
      *
      * @param $option
      * @return array
@@ -202,7 +218,7 @@ class RequestBenchmark
     }
 
     /**
-     * Get response from multi-threaded request
+     * Get response from multiuser request
      *
      * @return array
      */
@@ -219,7 +235,7 @@ class RequestBenchmark
     }
 
     /**
-     * Perform multi-threaded request
+     * Perform multiuser request
      *
      * @return float
      */
@@ -240,7 +256,7 @@ class RequestBenchmark
     }
 
     /**
-     * Setup required options for multi-threading
+     * Setup required options for multiuser
      *
      * @param array $options
      * @return void
@@ -248,13 +264,13 @@ class RequestBenchmark
     private function setupMultiThread(array $options): void
     {
         $this->cmh = curl_multi_init();
-        curl_multi_setopt($this->cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $this->multiThreadConfiguration['threads']);
-        curl_multi_setopt($this->cmh, CURLMOPT_MAX_PIPELINE_LENGTH, match ($this->multiThreadConfiguration['piping']) {
-            'optimal' => $this->multiThreadConfiguration['count'] <= $this->multiThreadConfiguration['threads']
-                ?: ceil($this->multiThreadConfiguration['count'] / $this->multiThreadConfiguration['threads']),
-            default => $this->multiThreadConfiguration['count']
+        curl_multi_setopt($this->cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $this->requestConfiguration['threads']);
+        curl_multi_setopt($this->cmh, CURLMOPT_MAX_PIPELINE_LENGTH, match ($this->requestConfiguration['piping']) {
+            'optimal' => $this->requestConfiguration['count'] <= $this->requestConfiguration['threads']
+                ?: ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
+            default => $this->requestConfiguration['count']
         });
-        for ($index = 0; $index < $this->multiThreadConfiguration['count']; $index++) {
+        for ($index = 0; $index < $this->requestConfiguration['count']; $index++) {
             $handle = curl_init();
             curl_setopt_array($handle, $options);
             curl_multi_add_handle($this->cmh, $handle);
@@ -262,7 +278,7 @@ class RequestBenchmark
     }
 
     /**
-     * Setup & execute single-threaded requests
+     * Setup & execute single user requests
      *
      * @param $handle
      * @return array
@@ -271,7 +287,7 @@ class RequestBenchmark
     private function seriesRequest($handle): array
     {
         $responseTime = [];
-        for ($count = 0; $count < $this->singleThreadConfiguration['count']; $count++) {
+        for ($count = 0; $count < $this->requestConfiguration['count']; $count++) {
             $startedAt = microtime(true);
             if (($status = $this->executeCurl($handle)['code']) !== $this->expect) {
                 curl_close($handle);
@@ -282,13 +298,8 @@ class RequestBenchmark
         curl_close($handle);
         $totalTime = array_sum($responseTime);
         return [
-            'req/s' => round($this->singleThreadConfiguration['count'] / $totalTime, 5),
-            'duration' => [
-                'total' => round($totalTime, 5),
-                'avg' => round($totalTime / $this->singleThreadConfiguration['count'], 5),
-                'min' => round(min($responseTime), 5),
-                'max' => round(max($responseTime), 5)
-            ]
+            'req/s' => round($this->requestConfiguration['count'] / $totalTime, 5),
+            'avgDuration' => round($totalTime / $this->requestConfiguration['count'], 5)
         ];
     }
 
@@ -325,14 +336,6 @@ class RequestBenchmark
         }
         $curlOption = [
             CURLOPT_URL => $this->url,
-            CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_SSL_VERIFYPEER => 0,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => "",
-            CURLOPT_MAXREDIRS => 1,
-            CURLOPT_TIMEOUT => 0,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
             CURLOPT_CUSTOMREQUEST => $this->method
         ];
         if (
@@ -346,6 +349,17 @@ class RequestBenchmark
                 $curlOption[CURLOPT_HTTPHEADER][] = "$key: $value";
             }
         }
+        $curlOption += $this->curlOptions;
+        $curlOption += [
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_SSL_VERIFYPEER => 0,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => "",
+            CURLOPT_MAXREDIRS => 1,
+            CURLOPT_TIMEOUT => 0,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1
+        ];
         return $curlOption;
     }
 }
