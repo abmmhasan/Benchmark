@@ -2,12 +2,14 @@
 
 namespace AbmmHasan\Benchmark;
 
+use AbmmHasan\OOF\Fence\Multi;
 use CurlMultiHandle;
 use Exception;
 use InvalidArgumentException;
 
 class RequestBenchmark
 {
+    use Multi;
     private CurlMultiHandle $cmh;
     private array $curlOptions = [];
     private array $headers = [];
