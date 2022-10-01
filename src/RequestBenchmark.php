@@ -149,8 +149,9 @@ class RequestBenchmark
         $this->result = [
             'error' => 'unfinished'
         ];
-        $startTime = microtime(true);
         $option = $this->prepareOption();
+        $this->checkConnection($option);
+        $startTime = microtime(true);
         $singleThreadReq = $this->singleThreaded($option);
         $this->result = [
             'req/s' => [
@@ -168,6 +169,7 @@ class RequestBenchmark
      *
      * @param string $key
      * @return array|int|string|string[]|null
+     * @throws Exception
      */
     public function __get(string $key)
     {
@@ -178,8 +180,35 @@ class RequestBenchmark
             'method' => $this->method,
             'url' => $this->url,
             'expectedStatus' => $this->expect,
-            'configuration' => $this->requestConfiguration
+            'configuration' => $this->requestConfiguration,
+            default => throw new Exception("Unknown key $key")
         };
+    }
+
+    /**
+     * Check connection before stating the operation
+     *
+     * @param array $option
+     * @return void
+     * @throws Exception
+     */
+    private function checkConnection(array $option): void
+    {
+        $curlCheck = curl_init();
+        curl_setopt_array($curlCheck, [
+                CURLOPT_NOBODY => true,
+                CURLOPT_CONNECTTIMEOUT => 1
+            ] + $option);
+        $exe = curl_exec($curlCheck);
+        if ($exe === false) {
+            curl_close($curlCheck);
+            throw new Exception("URL doesn't exist!");
+        }
+        if (($status = curl_getinfo($curlCheck, CURLINFO_HTTP_CODE)) !== $this->expect) {
+            curl_close($curlCheck);
+            throw new Exception("Status is invalid (Expected: $this->expect, Found: $status)");
+        }
+        curl_close($curlCheck);
     }
 
     /**
