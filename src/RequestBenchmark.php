@@ -10,9 +10,12 @@ use InvalidArgumentException;
 class RequestBenchmark
 {
     use Multi;
+
     private CurlMultiHandle $cmh;
     private array $curlOptions = [];
-    private array $headers = [];
+    private array $headers = [
+        'Cache-Control' => 'no-cache'
+    ];
     private ?string $body = null;
     private array $validMethods = [
         'GET',
@@ -89,6 +92,9 @@ class RequestBenchmark
      */
     public function setExpectedStatus(int $status = 200): static
     {
+        if ($status >= 500) {
+            throw new InvalidArgumentException('500 series are reserved Server error status!');
+        }
         $this->expect = $status;
         return $this;
     }
@@ -130,6 +136,8 @@ class RequestBenchmark
 
     /**
      * Set curl option (this will override curl settings except URL, Method, Header & Body)
+     *
+     * Ref: https://www.php.net/manual/en/function.curl-setopt.php
      *
      * @param array $curlOptions
      * @return static
@@ -198,17 +206,16 @@ class RequestBenchmark
     {
         $curlCheck = curl_init();
         curl_setopt_array($curlCheck, [
-                CURLOPT_NOBODY => true,
-                CURLOPT_CONNECTTIMEOUT => 1
+                CURLOPT_NOBODY => true
             ] + $option);
-        $exe = curl_exec($curlCheck);
-        if ($exe === false) {
+        $stat = $this->executeCurl($curlCheck);
+        if ($stat['response'] === false) {
             curl_close($curlCheck);
-            throw new Exception("URL doesn't exist!");
+            throw new Exception("URL not reachable!");
         }
-        if (($status = curl_getinfo($curlCheck, CURLINFO_HTTP_CODE)) !== $this->expect) {
+        if ($stat['code'] !== $this->expect) {
             curl_close($curlCheck);
-            throw new Exception("Status is invalid (Expected: $this->expect, Found: $status)");
+            throw new Exception("Status is invalid (Expected: $this->expect, Found: {$stat['code']})");
         }
         curl_close($curlCheck);
     }
@@ -386,10 +393,9 @@ class RequestBenchmark
             CURLOPT_SSL_VERIFYPEER => 0,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_ENCODING => "",
-            CURLOPT_MAXREDIRS => 1,
             CURLOPT_TIMEOUT => 0,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 1
         ];
         return $curlOption;
     }
