@@ -19,6 +19,6 @@
   "require": {
     "php": ">=8.0",
     "ext-curl": "*",
-    "abmmhasan/oof": "^1.04"
+    "abmmhasan/oof": "^1.05"
   }
 }

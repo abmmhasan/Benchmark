@@ -7,6 +7,15 @@ use CurlMultiHandle;
 use Exception;
 use InvalidArgumentException;
 
+/**
+ * @property array $configuration configuration set for api call
+ * @property array $expectedStatus status to expect during api call
+ * @property array $url url set for request
+ * @property array $method method set for request
+ * @property array $body body set for request
+ * @property array $headers headers set for request
+ * @property array $result result found from process
+ */
 class RequestBenchmark
 {
     use Multi;
@@ -27,13 +36,13 @@ class RequestBenchmark
     ];
     private int $expect = 200;
     private string $method = 'GET';
-    private string $url;
+    private string $url = '';
     private array $requestConfiguration = [
         'threads' => 10,
         'count' => 1000,
         'piping' => 'optimal'
     ];
-    private array $result = [
+    private array $outcome = [
         'error' => 'uninitialized'
     ];
 
@@ -156,14 +165,14 @@ class RequestBenchmark
      */
     public function start(): static
     {
-        $this->result = [
+        $this->outcome = [
             'error' => 'unfinished'
         ];
         $option = $this->prepareOption();
         $this->checkConnection($option);
         $startTime = microtime(true);
         $singleThreadReq = $this->singleThreaded($option);
-        $this->result = [
+        $this->outcome = [
             'req/s' => [
                 'singleUser' => $singleThreadReq['req/s'],
                 'multipleUsers' => $this->multiThreaded($option)['req/s']
@@ -184,7 +193,7 @@ class RequestBenchmark
     public function __get(string $key)
     {
         return match ($key) {
-            'result' => $this->result,
+            'result' => $this->outcome,
             'headers' => $this->headers,
             'body' => $this->body,
             'method' => $this->method,
@@ -211,11 +220,11 @@ class RequestBenchmark
         $stat = $this->executeCurl($curlCheck);
         if ($stat['response'] === false) {
             curl_close($curlCheck);
-            throw new Exception("URL not reachable!");
+            throw new Exception("Connectivity: URL not reachable!");
         }
         if ($stat['code'] !== $this->expect) {
             curl_close($curlCheck);
-            throw new Exception("Status is invalid (Expected: $this->expect, Found: {$stat['code']})");
+            throw new Exception("Connectivity: Status is invalid (Expected: $this->expect, Found: {$stat['code']})");
         }
         curl_close($curlCheck);
     }
@@ -233,7 +242,7 @@ class RequestBenchmark
         $duration = $this->threadedRequest();
         if (($diffs = array_diff($this->getThreadedResponse(), [$this->expect])) !== []) {
             throw new Exception(
-                "API status is invalid (Expected: $this->expect, Found: " . implode(', ', $diffs) . ")"
+                "Multi-Thread: API status is invalid (Expected: $this->expect, Found: " . implode(', ', $diffs) . ")"
             );
         }
         return [
@@ -304,8 +313,7 @@ class RequestBenchmark
         $this->cmh = curl_multi_init();
         curl_multi_setopt($this->cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $this->requestConfiguration['threads']);
         curl_multi_setopt($this->cmh, CURLMOPT_MAX_PIPELINE_LENGTH, match ($this->requestConfiguration['piping']) {
-            'optimal' => $this->requestConfiguration['count'] <= $this->requestConfiguration['threads']
-                ?: ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
+            'optimal' => ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
             default => $this->requestConfiguration['count']
         });
         for ($index = 0; $index < $this->requestConfiguration['count']; $index++) {
@@ -329,7 +337,7 @@ class RequestBenchmark
             $startedAt = microtime(true);
             if (($status = $this->executeCurl($handle)['code']) !== $this->expect) {
                 curl_close($handle);
-                throw new Exception("API status is invalid (Expected: $this->expect, Found: $status)");
+                throw new Exception("Single-Thread: API status is invalid (Expected: $this->expect, Found: $status)");
             }
             $responseTime[] = microtime(true) - $startedAt;
         }
