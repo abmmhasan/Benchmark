@@ -9,14 +9,16 @@ use ReflectionException;
 
 class UnitBenchmark extends Container
 {
+    private static array $usage = [];
+
     /**
      * Call the desired closure
      *
      * @param string|Closure|callable $closureAlias
-     * @return float
-     * @throws Exception
+     * @return array
+     * @throws Exception|ReflectionException
      */
-    public function callClosure(string|Closure|callable $closureAlias): float
+    public function callClosure(string|Closure|callable $closureAlias): array
     {
         if ($closureAlias instanceof Closure || is_callable($closureAlias)) {
             $closure = $closureAlias;
@@ -27,9 +29,9 @@ class UnitBenchmark extends Container
         } else {
             throw new Exception('Closure not registered!');
         }
-        $startAt = microtime(true);
+        $startsAt = $this->getUsage();
         (new $this->resolver($this->assets))->closureSettler($closure, $params);
-        return $this->calculate($startAt);
+        return $this->calculate($startsAt);
     }
 
     /**
@@ -37,32 +39,61 @@ class UnitBenchmark extends Container
      *
      * @param string $class
      * @param string|null $method
-     * @return float
+     * @return array
      * @throws ReflectionException
      */
-    public function callMethod(string $class, string $method = null): float
+    public function callMethod(string $class, string $method = null): array
     {
-        $startAt = microtime(true);
+        $startsAt = $this->getUsage();
         (new $this->resolver($this->assets))->classSettler($class, $method)['returned'];
-        return $this->calculate($startAt);
+        return $this->calculate($startsAt);
     }
 
     /**
      * Get Class Instance
      *
      * @param string $class
-     * @return float
+     * @return array
      * @throws ReflectionException
      */
-    public function getInstance(string $class): float
+    public function getInstance(string $class): array
     {
-        $startAt = microtime(true);
+        $startsAt = $this->getUsage();
         (new $this->resolver($this->assets))->classSettler($class, false)['instance'];
-        return $this->calculate($startAt);
+        return $this->calculate($startsAt);
     }
 
-    private function calculate($start): float
+    public static function snapshot()
     {
-        return round(microtime(true) - $start, 5);
+        self::$usage[] = memory_get_usage();
+    }
+
+    /**
+     * @return array
+     */
+    private function getUsage(): array
+    {
+        return [
+            'time' => microtime(true),
+            'peak' => memory_get_peak_usage()
+        ];
+    }
+
+    /**
+     * @param $startsAt
+     * @return array
+     */
+    private function calculate($startsAt): array
+    {
+        $stopsAt = $this->getUsage();
+        $memory = null;
+        if (!empty(self::$usage)) {
+            $memory = array_sum(self::$usage) / count(self::$usage);
+        }
+        return [
+            'duration' => $stopsAt['time'] - $startsAt['time'],
+            'peakMemory' => $stopsAt['peak'] - $startsAt['peak'],
+            'memory' => $memory
+        ];
     }
 }
