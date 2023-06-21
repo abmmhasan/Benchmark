@@ -7,6 +7,15 @@ use CurlMultiHandle;
 use Exception;
 use InvalidArgumentException;
 
+/**
+ * @property array $configuration configuration set for api call
+ * @property array $expectedStatus status to expect during api call
+ * @property array $url url set for request
+ * @property array $method method set for request
+ * @property array $body body set for request
+ * @property array $headers headers set for request
+ * @property array $result result found from process
+ */
 class RequestBenchmark
 {
     use Multi;
@@ -299,15 +308,13 @@ class RequestBenchmark
     private function setupMultiThread(array $options): void
     {
         $this->cmh = curl_multi_init();
+        $maxConnections = match ($this->requestConfiguration['piping']) {
+            'optimal' => ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
+            default => $this->requestConfiguration['count']
+        };
         curl_multi_setopt($this->cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $this->requestConfiguration['threads']);
-        curl_multi_setopt(
-            $this->cmh,
-            CURLMOPT_MAX_PIPELINE_LENGTH,
-            match ($this->requestConfiguration['piping']) {
-                'optimal' => ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
-                default => $this->requestConfiguration['count']
-            }
-        );
+        curl_multi_setopt($this->cmh, CURLMOPT_MAX_HOST_CONNECTIONS, $this->requestConfiguration['threads']);
+        curl_multi_setopt($this->cmh, CURLMOPT_MAX_PIPELINE_LENGTH, $maxConnections);
         for ($index = 0; $index < $this->requestConfiguration['count']; $index++) {
             $handle = curl_init();
             curl_setopt_array($handle, $options);
