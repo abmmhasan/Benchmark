@@ -2,20 +2,11 @@
 
 namespace AbmmHasan\Benchmark;
 
-use AbmmHasan\OOF\Fence\Multi;
+use AbmmHasan\InterMix\Fence\Multi;
 use CurlMultiHandle;
 use Exception;
 use InvalidArgumentException;
 
-/**
- * @property array $configuration configuration set for api call
- * @property array $expectedStatus status to expect during api call
- * @property array $url url set for request
- * @property array $method method set for request
- * @property array $body body set for request
- * @property array $headers headers set for request
- * @property array $result result found from process
- */
 class RequestBenchmark
 {
     use Multi;
@@ -118,11 +109,10 @@ class RequestBenchmark
      * @throws Exception
      */
     public function setUserOption(
-        int    $numberOfUsers = 10,
-        int    $numberOfRequests = 1000,
+        int $numberOfUsers = 10,
+        int $numberOfRequests = 1000,
         string $pipingType = 'optimal'
-    ): static
-    {
+    ): static {
         if ($numberOfUsers < 2) {
             throw new Exception('Minimum required thread count is 2!');
         }
@@ -133,7 +123,7 @@ class RequestBenchmark
             throw new Exception('Request count should be greater than or equal to given thread!');
         }
         if (!in_array($pipingType, ['optimal', 'max'])) {
-            throw new Exception('Pipe: Invalid type!');
+            throw new Exception('Pipe: Invalid type (can be "optimal" or "max")!');
         }
         $this->requestConfiguration = [
             'threads' => $numberOfUsers,
@@ -214,9 +204,7 @@ class RequestBenchmark
     private function checkConnection(array $option): void
     {
         $curlCheck = curl_init();
-        curl_setopt_array($curlCheck, [
-                CURLOPT_NOBODY => true
-            ] + $option);
+        curl_setopt_array($curlCheck, [CURLOPT_NOBODY => true] + $option);
         $stat = $this->executeCurl($curlCheck);
         if ($stat['response'] === false) {
             curl_close($curlCheck);
@@ -289,7 +277,7 @@ class RequestBenchmark
     private function threadedRequest(): float
     {
         $startedAt = microtime(true);
-        for (; ;) {
+        while (true) {
             $running = 0;
             do {
                 $error = curl_multi_exec($this->cmh, $running);
@@ -312,10 +300,14 @@ class RequestBenchmark
     {
         $this->cmh = curl_multi_init();
         curl_multi_setopt($this->cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $this->requestConfiguration['threads']);
-        curl_multi_setopt($this->cmh, CURLMOPT_MAX_PIPELINE_LENGTH, match ($this->requestConfiguration['piping']) {
-            'optimal' => ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
-            default => $this->requestConfiguration['count']
-        });
+        curl_multi_setopt(
+            $this->cmh,
+            CURLMOPT_MAX_PIPELINE_LENGTH,
+            match ($this->requestConfiguration['piping']) {
+                'optimal' => ceil($this->requestConfiguration['count'] / $this->requestConfiguration['threads']),
+                default => $this->requestConfiguration['count']
+            }
+        );
         for ($index = 0; $index < $this->requestConfiguration['count']; $index++) {
             $handle = curl_init();
             curl_setopt_array($handle, $options);

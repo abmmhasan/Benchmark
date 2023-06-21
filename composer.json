@@ -18,7 +18,6 @@
   "prefer-stable": true,
   "require": {
     "php": ">=8.0",
-    "ext-curl": "*",
-    "abmmhasan/oof": "^1.05"
+    "ext-curl": "*"
   }
 }
