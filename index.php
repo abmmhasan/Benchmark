@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 require __DIR__ . '/vendor/autoload.php';
@@ -14,29 +15,29 @@ use AbmmHasan\Benchmark\{
 // 1)  Define your benchmark configurations
 //
 $config1 = new BenchmarkConfig(
-    url:            'https://localhost.internal/json',
-    method:         HttpMethod::GET,
-    headers:        ['Accept' => 'application/json'],
+    url: 'https://localhost.internal/json',
+    method: HttpMethod::GET,
+    headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
-    threads:        5,
-    count:          500,
-    piping:         PipingMode::Optimal,
-    timeout:        2,
-    enableHttp2:    true,
-    name:           'webrick'
+    threads: 5,
+    count: 500,
+    piping: PipingMode::Optimal,
+    timeout: 2,
+    enableHttp2: true,
+    name: 'webrick',
 );
 
 $config2 = new BenchmarkConfig(
-    url:            'https://local.easy.com.bd/api/json',
-    method:         HttpMethod::GET,
-    headers:        ['Accept' => 'application/json'],
+    url: 'https://local.easy.com.bd/api/json',
+    method: HttpMethod::GET,
+    headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
-    threads:        5,
-    count:          500,
-    piping:         PipingMode::Optimal,
-    timeout:        2,
-    enableHttp2:    true,
-    name:           'laravel'
+    threads: 5,
+    count: 500,
+    piping: PipingMode::Optimal,
+    timeout: 2,
+    enableHttp2: true,
+    name: 'laravel',
 );
 
 //
