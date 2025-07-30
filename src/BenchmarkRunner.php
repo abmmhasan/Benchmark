@@ -1,7 +1,10 @@
 <?php
+
 declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
+
+use InvalidArgumentException;
 
 final class BenchmarkRunner
 {
@@ -18,7 +21,7 @@ final class BenchmarkRunner
     /**
      * Run all benchmarks and format the output.
      *
-     * @param 'array'|'json'|'table' $format
+     * @param 'array'|'json'|'table'|'csv' $format
      * @return array|string
      */
     public function runAll(string $format = 'array'): array|string
@@ -26,13 +29,15 @@ final class BenchmarkRunner
         $data = $this->runAllRaw();
 
         return match ($format) {
-            'json'  => json_encode($data, JSON_PRETTY_PRINT),
+            'json' => json_encode($data, JSON_PRETTY_PRINT),
             'table' => $this->toMarkdownTable($data),
-            default => $data,
+            'csv' => $this->toCsv($data),
+            'array' => $data,
+            default => throw new InvalidArgumentException("Unknown format: {$format}"),
         };
     }
 
-    /** @return array<string, array> Raw results keyed by config name */
+    /** @return array<string, array> raw results keyed by config name */
     private function runAllRaw(): array
     {
         $out = [];
@@ -42,52 +47,86 @@ final class BenchmarkRunner
         return $out;
     }
 
-    /**
-     * Turn the raw results into a Markdown comparison table.
-     *
-     * @param array<string, array> $data
-     * @return string
-     */
+    /* ------------------------------------------------------------------ */
+    /* Helpers: Markdown & CSV                                            */
+    /* ------------------------------------------------------------------ */
+
     private function toMarkdownTable(array $data): string
     {
-        // 1) Flatten each config's metrics into name→value
-        $flattened = [];
+        [$header, $rows] = $this->flatten($data);
+
+        $separator = '| ' . implode(' | ', array_fill(0, count($header), '---')) . ' |';
+        $tableRows = array_map(
+            static fn($r) => '| ' . implode(' | ', $r) . ' |',
+            $rows,
+        );
+
+        return implode("\n", [
+                '| ' . implode(' | ', $header) . ' |',
+                $separator,
+                ...$tableRows,
+            ]) . "\n";
+    }
+
+    private function toCsv(array $data): string
+    {
+        [$header, $rows] = $this->flatten($data);
+
+        $fh = fopen('php://memory', 'r+');
+        fputcsv($fh, $header);
+        foreach ($rows as $row) {
+            fputcsv($fh, $row);
+        }
+        rewind($fh);
+        return stream_get_contents($fh);
+    }
+
+    /**
+     * Flatten nested metric arrays and return [$header, $rows] ready for
+     * Markdown or CSV emission.
+     */
+    private function flatten(array $data): array
+    {
+        // 1) flatten each benchmark
+        $flat = [];
         foreach ($data as $name => $result) {
             $map = ['totalDuration' => $result['totalDuration']];
-            foreach ($result['single']   as $m => $v) { $map["single.$m"]   = $v; }
-            foreach ($result['multiple'] as $m => $v) { $map["multiple.$m"] = $v; }
-            $flattened[$name] = $map;
-        }
-
-        // 2) Gather all metric keys (no array_merge)
-        $allMetrics = [];
-        foreach ($flattened as $map) {
-            foreach (array_keys($map) as $metric) {
-                $allMetrics[$metric] = true;
+            foreach ($result['single'] as $m => $v) {
+                $map["single.$m"] = $v;
             }
+            foreach ($result['multiple'] as $m => $v) {
+                $map["multiple.$m"] = $v;
+            }
+            $flat[$name] = $map;
         }
-        $allMetrics = array_keys($allMetrics);
-        sort($allMetrics);
 
-        // 3) Build header
-        $names     = array_keys($flattened);
-        $header    = '| Metric | ' . implode(' | ', $names) . ' |';
-        $separator = '| ' . implode(' | ', array_fill(0, count($names) + 1, '---')) . ' |';
+        // 2) collect unique metric keys – preserve a sensible order
+        $preferred = [
+            'single.req_per_sec',
+            'single.avg',
+            'single.p95',
+            'single.median',
+            'single.min',
+            'single.max',
+            'single.avg_connect_time',
+            'single.avg_ttfb',
+            'multiple.req_per_sec',
+            'totalDuration',
+        ];
+        $allMetrics = array_keys(array_reduce($flat, static fn($c, $m) => $c + $m, []));
+        $metrics = array_values(array_unique([...$preferred, ...$allMetrics]));
 
-        // 4) Build each row
+        // 3) build header + rows
+        $header = ['Metric', ...array_keys($flat)];
         $rows = [];
-        foreach ($allMetrics as $metric) {
-            $cells = ["`{$metric}`"];
-            foreach ($names as $name) {
-                $cells[] = $flattened[$name][$metric] ?? '';
+        foreach ($metrics as $metric) {
+            $cells = [$metric];
+            foreach ($flat as $name => $map) {
+                $cells[] = $map[$metric] ?? '';
             }
-            $rows[] = '| ' . implode(' | ', $cells) . ' |';
+            $rows[] = $cells;
         }
 
-        // 5) Join into final table
-        return implode("\n", array_merge(
-            [$header, $separator],
-            $rows
-        )). "\n ";
+        return [$header, $rows];
     }
 }

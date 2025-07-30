@@ -3,21 +3,24 @@ declare(strict_types=1);
 
 require __DIR__ . '/vendor/autoload.php';
 
-use AbmmHasan\Benchmark\BenchmarkConfig;
-use AbmmHasan\Benchmark\BenchmarkRunner;
+use AbmmHasan\Benchmark\{
+    BenchmarkConfig,
+    BenchmarkRunner,
+    HttpMethod,
+    PipingMode
+};
 
 //
-// 1) Define your configurations
+// 1)  Define your benchmark configurations
 //
 $config1 = new BenchmarkConfig(
     url:            'https://localhost.internal/json',
-    method:         'GET',
+    method:         HttpMethod::GET,
     headers:        ['Accept' => 'application/json'],
-    body:           null,
     expectedStatus: 200,
     threads:        5,
     count:          500,
-    piping:         'optimal',
+    piping:         PipingMode::Optimal,
     timeout:        2,
     enableHttp2:    true,
     name:           'webrick'
@@ -25,13 +28,12 @@ $config1 = new BenchmarkConfig(
 
 $config2 = new BenchmarkConfig(
     url:            'https://local.easy.com.bd/api/json',
-    method:         'GET',
+    method:         HttpMethod::GET,
     headers:        ['Accept' => 'application/json'],
-    body:           null,
     expectedStatus: 200,
     threads:        5,
     count:          500,
-    piping:         'optimal',
+    piping:         PipingMode::Optimal,
     timeout:        2,
     enableHttp2:    true,
     name:           'laravel'
@@ -39,25 +41,23 @@ $config2 = new BenchmarkConfig(
 
 $config3 = new BenchmarkConfig(
     url:            'https://localhost.internal/',
-    method:         'GET',
+    method:         HttpMethod::GET,
     headers:        ['Accept' => 'application/json'],
-    body:           null,
     expectedStatus: 200,
     threads:        5,
     count:          500,
-    piping:         'optimal',
+    piping:         PipingMode::Optimal,
     timeout:        2,
     enableHttp2:    true,
     name:           'wr-home'
 );
 
 //
-// 2) Create the runner with as many configs as you like
+// 2)  Create the runner with any number of configs
 //
 $runner = new BenchmarkRunner($config1, $config2, $config3);
-//$runner = new BenchmarkRunner($configOrders);
 
 //
-// 3) Execute all benchmarks and collect results
+// 3)  Execute all benchmarks and print a Markdown table
 //
 echo $runner->runAll('table');

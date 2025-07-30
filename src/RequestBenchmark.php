@@ -10,7 +10,6 @@ use Exception;
 final class RequestBenchmark
 {
     private BenchmarkConfig $config;
-    private CurlMultiHandle $cmh;
 
     public function __construct(BenchmarkConfig $config)
     {
@@ -18,13 +17,15 @@ final class RequestBenchmark
     }
 
     /**
-     * Run both single- and multi-threaded benchmarks,
-     * collect rich stats, and return everything in one array.
+     * Run both single- and multi-threaded benchmarks and return rich stats.
      */
     public function run(): array
     {
         $opts = $this->prepareOptions();
-        $this->checkConnection($opts);
+
+        if (!$this->config->skipPreflight()) {
+            $this->checkConnection($opts);
+        }
 
         $t0 = microtime(true);
         $single = $this->singleThreaded($opts);
@@ -39,10 +40,16 @@ final class RequestBenchmark
         ];
     }
 
-    /** central “base” curl options (no CURLOPT_PIPELINING here) */
+    /* ---------------------------------------------------------------------
+     * Internals
+     * ------------------------------------------------------------------- */
+
+    /** Base curl options common to both modes (no pipelining here). */
     private function baseCurlOptions(): array
     {
         return [
+//                CURLOPT_SSL_VERIFYHOST => 2,
+//                CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_SSL_VERIFYHOST => 0,
                 CURLOPT_SSL_VERIFYPEER => 0,
                 CURLOPT_RETURNTRANSFER => true,
@@ -53,44 +60,30 @@ final class RequestBenchmark
             ] + $this->config->getCurlOptions();
     }
 
-    /** merge URL, method, headers, body, plus base options */
+    /** Merge URL, method, headers, body, plus base options. */
     private function prepareOptions(): array
     {
         $o = [
             CURLOPT_URL => $this->config->getUrl(),
-            CURLOPT_CUSTOMREQUEST => $this->config->getMethod(),
+            CURLOPT_CUSTOMREQUEST => $this->config->getMethod()->value,
         ];
 
-        // auto-JSON-encode arrays
         $body = $this->config->getBody();
+        $headers = $this->config->getHeaders();
+
+        // auto-JSON encode arrays
         if (is_array($body)) {
             $o[CURLOPT_POSTFIELDS] = json_encode($body);
-            $hdrs = $this->config->getHeaders();
-            $hdrs['Content-Type'] = 'application/json';
-            // rebuild config to include the new header
-            $this->config = new BenchmarkConfig(
-                $this->config->getUrl(),
-                $this->config->getMethod(),
-                $hdrs,
-                $body,
-                $this->config->getExpectedStatus(),
-                $this->config->getThreads(),
-                $this->config->getCount(),
-                $this->config->getPiping(),
-                $this->config->getTimeout(),
-                $this->config->isHttp2Enabled(),
-                $this->config->getCurlOptions(),
-                $this->config->getName(),
-            );
+            $headers['Content-Type'] ??= 'application/json';
         } elseif (is_string($body)) {
             $o[CURLOPT_POSTFIELDS] = $body;
         }
 
-        if ($this->config->getHeaders()) {
+        if ($headers) {
             $o[CURLOPT_HTTPHEADER] = array_map(
-                fn($k, $v) => "$k: $v",
-                array_keys($this->config->getHeaders()),
-                $this->config->getHeaders(),
+                static fn($k, $v) => "{$k}: {$v}",
+                array_keys($headers),
+                $headers,
             );
         }
 
@@ -103,14 +96,14 @@ final class RequestBenchmark
     }
 
     /**
-     * quick HEAD-check for connectivity & expected status
-     * — force HTTP/1.1 and disable pipelining for the check
+     * Quick HEAD-check for connectivity & expected status.
+     * Uses HTTP/1.1 & no pipelining for maximum compatibility.
      */
     private function checkConnection(array $opts): void
     {
         $ch = curl_init();
 
-        // prepare HEAD-specific options
+        // HEAD specific tweaks
         $headOpts = $opts;
         $headOpts[CURLOPT_NOBODY] = true;
         $headOpts[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
@@ -131,7 +124,8 @@ final class RequestBenchmark
         }
     }
 
-    /** single-user series; tracks per-request times, connect/TTFB, and computes min/max/median/p95 */
+    /* ---------- single-threaded benchmark -------------------------------- */
+
     private function singleThreaded(array $opts): array
     {
         $ch = curl_init();
@@ -143,13 +137,17 @@ final class RequestBenchmark
 
         try {
             for ($i = 0; $i < $this->config->getCount(); $i++) {
+                if ($i > 0) {
+                    curl_reset($ch);
+                    curl_setopt_array($ch, $opts);
+                }
+
                 $t0 = microtime(true);
-                $resp = curl_exec($ch);
+                curl_exec($ch);
                 $info = curl_getinfo($ch);
-                $err = curl_error($ch);
 
                 if ($info['http_code'] !== $this->config->getExpectedStatus()) {
-                    throw new Exception("Single-thread: HTTP {$info['http_code']} ({$err})");
+                    throw new Exception("Single-thread: unexpected HTTP {$info['http_code']}");
                 }
 
                 $times[] = microtime(true) - $t0;
@@ -164,7 +162,8 @@ final class RequestBenchmark
         $n = count($times);
         $total = array_sum($times);
         $median = $times[(int)floor($n / 2)];
-        $p95 = $times[(int)floor($n * 0.95)];
+        $p95Idx = max(0, (int)ceil($n * 0.95) - 1);
+        $p95 = $times[$p95Idx];
 
         return [
             'req_per_sec' => round($n / $total, 5),
@@ -178,55 +177,78 @@ final class RequestBenchmark
         ];
     }
 
-    /** multi-user: set up curl_multi with pipelining/multiplexing, then exec & verify codes */
+    /* ---------- multi-threaded benchmark --------------------------------- */
+
     private function multiThreaded(array $opts): array
     {
+        /** @var CurlMultiHandle $cmh */
         $cmh = curl_multi_init();
         $threads = $this->config->getThreads();
+        $total = $this->config->getCount();
 
         curl_multi_setopt($cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $threads);
         curl_multi_setopt($cmh, CURLMOPT_MAX_HOST_CONNECTIONS, $threads);
 
-        // choose pipelining/multiplex flags
+        // choose pipelining / multiplex flags
         $pipeline = match ($this->config->getPiping()) {
-            'optimal' => $this->config->isHttp2Enabled() ? CURLPIPE_MULTIPLEX : 0,
-            'max' => CURLPIPE_MULTIPLEX,
+            PipingMode::Optimal => $this->config->isHttp2Enabled() ? CURLPIPE_MULTIPLEX : 0,
+            PipingMode::Max => CURLPIPE_MULTIPLEX,
         };
         curl_multi_setopt($cmh, CURLMOPT_PIPELINING, $pipeline);
 
-        $maxPipe = $this->config->getPiping() === 'optimal'
-            ? (int)ceil($this->config->getCount() / $threads)
-            : $this->config->getCount();
+        $maxPipe = $this->config->getPiping() === PipingMode::Optimal
+            ? (int)ceil($total / $threads)
+            : $total;
         curl_multi_setopt($cmh, CURLMOPT_MAX_PIPELINE_LENGTH, $maxPipe);
 
-        for ($i = 0; $i < $this->config->getCount(); $i++) {
+        // queue helpers ----------------------------------------------------
+        $launched = 0;
+        $inFlight = 0;
+        $codes = [];
+        $startTime = microtime(true);
+
+        $enqueue = function () use (&$launched, &$inFlight, $total, $opts, $cmh): void {
             $h = curl_init();
             curl_setopt_array($h, $opts);
             curl_multi_add_handle($cmh, $h);
+            $launched++;
+            $inFlight++;
+        };
+
+        // prime the queue
+        $initial = min($threads, $total);
+        for ($i = 0; $i < $initial; $i++) {
+            $enqueue();
         }
 
-        $t0 = microtime(true);
-        try {
-            do {
-                curl_multi_exec($cmh, $running);
-            } while ($running > 0);
-        } finally {
-            curl_multi_close($cmh);
-        }
-        $duration = microtime(true) - $t0;
+        // main loop
+        do {
+            curl_multi_exec($cmh, $running);
+            curl_multi_select($cmh, 1.0);
+
+            while ($info = curl_multi_info_read($cmh)) {
+                $codes[] = curl_getinfo($info['handle'], CURLINFO_HTTP_CODE);
+
+                curl_multi_remove_handle($cmh, $info['handle']);
+                curl_close($info['handle']);
+                $inFlight--;
+
+                // keep queue full until we've launched $total requests
+                if ($launched < $total) {
+                    $enqueue();
+                }
+            }
+        } while ($running || $inFlight > 0);
+
+        $duration = microtime(true) - $startTime;
+        curl_multi_close($cmh);
 
         // verify all HTTP codes
-        $codes = [];
-        while ($info = curl_multi_info_read($cmh)) {
-            $codes[] = curl_getinfo($info['handle'], CURLINFO_HTTP_CODE);
-            curl_multi_remove_handle($cmh, $info['handle']);
-            curl_close($info['handle']);
-        }
         $bad = array_diff($codes, [$this->config->getExpectedStatus()]);
         if ($bad) {
-            throw new Exception("Multi-thread: unexpected status codes: " . implode(', ', $bad));
+            throw new Exception("Multi-thread: unexpected status codes: " . implode(', ', array_unique($bad)));
         }
 
-        return ['req_per_sec' => round($this->config->getCount() / $duration, 5)];
+        return ['req_per_sec' => round($total / $duration, 5)];
     }
 }
