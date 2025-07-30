@@ -39,23 +39,10 @@ $config2 = new BenchmarkConfig(
     name:           'laravel'
 );
 
-$config3 = new BenchmarkConfig(
-    url:            'https://localhost.internal/',
-    method:         HttpMethod::GET,
-    headers:        ['Accept' => 'application/json'],
-    expectedStatus: 200,
-    threads:        5,
-    count:          500,
-    piping:         PipingMode::Optimal,
-    timeout:        2,
-    enableHttp2:    true,
-    name:           'wr-home'
-);
-
 //
 // 2)  Create the runner with any number of configs
 //
-$runner = new BenchmarkRunner($config1, $config2, $config3);
+$runner = new BenchmarkRunner($config1, $config2);
 
 //
 // 3)  Execute all benchmarks and print a Markdown table
