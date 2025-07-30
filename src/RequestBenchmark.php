@@ -181,64 +181,52 @@ final class RequestBenchmark
     /** multi-user: set up curl_multi with pipelining/multiplexing, then exec & verify codes */
     private function multiThreaded(array $opts): array
     {
-        $mh       = curl_multi_init();
-        $threads  = $this->config->getThreads();
-        $count    = $this->config->getCount();
-        $expected = $this->config->getExpectedStatus();
+        $cmh     = curl_multi_init();
+        $threads = $this->config->getThreads();
 
-        // 1) concurrency & pipelining
-        curl_multi_setopt($mh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $threads);
-        curl_multi_setopt($mh, CURLMOPT_MAX_HOST_CONNECTIONS,  $threads);
+        curl_multi_setopt($cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $threads);
+        curl_multi_setopt($cmh, CURLMOPT_MAX_HOST_CONNECTIONS,  $threads);
+
+        // choose pipelining/multiplex flags
         $pipeline = match ($this->config->getPiping()) {
             'optimal' => $this->config->isHttp2Enabled() ? CURLPIPE_MULTIPLEX : 0,
             'max'     => CURLPIPE_MULTIPLEX,
         };
-        curl_multi_setopt($mh, CURLMOPT_PIPELINING, $pipeline);
-        curl_multi_setopt($mh, CURLMOPT_MAX_PIPELINE_LENGTH,
-            $this->config->getPiping() === 'optimal'
-                ? (int) ceil($count / $threads)
-                : $count
-        );
+        curl_multi_setopt($cmh, CURLMOPT_PIPELINING, $pipeline);
 
-        // 2) add handles
-        $handles = [];
-        for ($i = 0; $i < $count; $i++) {
+        $maxPipe = $this->config->getPiping() === 'optimal'
+            ? (int) ceil($this->config->getCount() / $threads)
+            : $this->config->getCount();
+        curl_multi_setopt($cmh, CURLMOPT_MAX_PIPELINE_LENGTH, $maxPipe);
+
+        for ($i = 0; $i < $this->config->getCount(); $i++) {
             $h = curl_init();
             curl_setopt_array($h, $opts);
-            curl_multi_add_handle($mh, $h);
-            $handles[] = $h;
+            curl_multi_add_handle($cmh, $h);
         }
 
-        // 3) run with select() to wait for I/O
-        $active = null;
-        $start  = microtime(true);
-        do {
-            $mrc = curl_multi_exec($mh, $active);
-            if ($mrc !== CURLM_OK) {
-                throw new Exception("curl_multi_exec error: $mrc");
-            }
-            // wait up to 1s for activity
-            curl_multi_select($mh, 1.0);
-        } while ($active > 0);
-        $duration = microtime(true) - $start;
+        $t0 = microtime(true);
+        try {
+            do {
+                curl_multi_exec($cmh, $running);
+            } while ($running > 0);
+        } finally {
+            curl_multi_close($cmh);
+        }
+        $duration = microtime(true) - $t0;
 
-        // 4) collect HTTP codes and cleanup
+        // verify all HTTP codes
         $codes = [];
-        foreach ($handles as $h) {
-            $codes[] = curl_getinfo($h, CURLINFO_HTTP_CODE);
-            curl_multi_remove_handle($mh, $h);
-            curl_close($h);
+        while ($info = curl_multi_info_read($cmh)) {
+            $codes[] = curl_getinfo($info['handle'], CURLINFO_HTTP_CODE);
+            curl_multi_remove_handle($cmh, $info['handle']);
+            curl_close($info['handle']);
         }
-        curl_multi_close($mh);
-
-        // 5) verify
-        $bad = array_diff($codes, [$expected]);
+        $bad = array_diff($codes, [$this->config->getExpectedStatus()]);
         if ($bad) {
-            throw new Exception("Multi-thread: unexpected status codes: ".implode(', ',$bad));
+            throw new Exception("Multi-thread: unexpected status codes: " . implode(', ', $bad));
         }
 
-        return [
-            'req_per_sec' => round($count / $duration, 5)
-        ];
+        return ['req_per_sec' => round($this->config->getCount() / $duration, 5)];
     }
 }
