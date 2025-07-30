@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
@@ -25,15 +26,15 @@ final class RequestBenchmark
         $opts = $this->prepareOptions();
         $this->checkConnection($opts);
 
-        $t0     = microtime(true);
+        $t0 = microtime(true);
         $single = $this->singleThreaded($opts);
-        $multi  = $this->multiThreaded($opts);
-        $total  = round(microtime(true) - $t0, 5);
+        $multi = $this->multiThreaded($opts);
+        $total = round(microtime(true) - $t0, 5);
 
         return [
-            'name'          => $this->config->getName(),
-            'single'        => $single,
-            'multiple'      => $multi,
+            'name' => $this->config->getName(),
+            'single' => $single,
+            'multiple' => $multi,
             'totalDuration' => $total,
         ];
     }
@@ -45,10 +46,10 @@ final class RequestBenchmark
                 CURLOPT_SSL_VERIFYHOST => 0,
                 CURLOPT_SSL_VERIFYPEER => 0,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_ENCODING       => '',
+                CURLOPT_ENCODING => '',
                 CURLOPT_FOLLOWLOCATION => false,
                 CURLOPT_CONNECTTIMEOUT => $this->config->getTimeout(),
-                CURLOPT_TIMEOUT        => $this->config->getTimeout(),
+                CURLOPT_TIMEOUT => $this->config->getTimeout(),
             ] + $this->config->getCurlOptions();
     }
 
@@ -56,7 +57,7 @@ final class RequestBenchmark
     private function prepareOptions(): array
     {
         $o = [
-            CURLOPT_URL           => $this->config->getUrl(),
+            CURLOPT_URL => $this->config->getUrl(),
             CURLOPT_CUSTOMREQUEST => $this->config->getMethod(),
         ];
 
@@ -64,8 +65,8 @@ final class RequestBenchmark
         $body = $this->config->getBody();
         if (is_array($body)) {
             $o[CURLOPT_POSTFIELDS] = json_encode($body);
-            $hdrs                  = $this->config->getHeaders();
-            $hdrs['Content-Type']  = 'application/json';
+            $hdrs = $this->config->getHeaders();
+            $hdrs['Content-Type'] = 'application/json';
             // rebuild config to include the new header
             $this->config = new BenchmarkConfig(
                 $this->config->getUrl(),
@@ -79,7 +80,7 @@ final class RequestBenchmark
                 $this->config->getTimeout(),
                 $this->config->isHttp2Enabled(),
                 $this->config->getCurlOptions(),
-                $this->config->getName()
+                $this->config->getName(),
             );
         } elseif (is_string($body)) {
             $o[CURLOPT_POSTFIELDS] = $body;
@@ -89,7 +90,7 @@ final class RequestBenchmark
             $o[CURLOPT_HTTPHEADER] = array_map(
                 fn($k, $v) => "$k: $v",
                 array_keys($this->config->getHeaders()),
-                $this->config->getHeaders()
+                $this->config->getHeaders(),
             );
         }
 
@@ -111,13 +112,13 @@ final class RequestBenchmark
 
         // prepare HEAD-specific options
         $headOpts = $opts;
-        $headOpts[CURLOPT_NOBODY]       = true;
+        $headOpts[CURLOPT_NOBODY] = true;
         $headOpts[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
 
         curl_setopt_array($ch, $headOpts);
         $resp = curl_exec($ch);
         $info = curl_getinfo($ch);
-        $err  = curl_error($ch);
+        $err = curl_error($ch);
         curl_close($ch);
 
         if ($resp === false) {
@@ -125,7 +126,7 @@ final class RequestBenchmark
         }
         if ($info['http_code'] !== $this->config->getExpectedStatus()) {
             throw new Exception(
-                "Connectivity: expected {$this->config->getExpectedStatus()}, got {$info['http_code']}"
+                "Connectivity: expected {$this->config->getExpectedStatus()}, got {$info['http_code']}",
             );
         }
     }
@@ -136,66 +137,65 @@ final class RequestBenchmark
         $ch = curl_init();
         curl_setopt_array($ch, $opts);
 
-        $times    = [];
+        $times = [];
         $connects = [];
-        $ttfbs    = [];
+        $ttfbs = [];
 
         try {
             for ($i = 0; $i < $this->config->getCount(); $i++) {
-                $t0   = microtime(true);
+                $t0 = microtime(true);
                 $resp = curl_exec($ch);
                 $info = curl_getinfo($ch);
-                $err  = curl_error($ch);
+                $err = curl_error($ch);
 
                 if ($info['http_code'] !== $this->config->getExpectedStatus()) {
                     throw new Exception("Single-thread: HTTP {$info['http_code']} ({$err})");
                 }
 
-                $dur = microtime(true) - $t0;
-                $times[]    = $dur;
+                $times[] = microtime(true) - $t0;
                 $connects[] = $info['connect_time'];
-                $ttfbs[]    = $info['starttransfer_time'];
+                $ttfbs[] = $info['starttransfer_time'];
             }
         } finally {
             curl_close($ch);
         }
 
         sort($times);
-        $n      = count($times);
-        $total  = array_sum($times);
-        $median = $times[(int) floor($n / 2)];
-        $p95    = $times[(int) floor($n * 0.95)];
+        $n = count($times);
+        $total = array_sum($times);
+        $median = $times[(int)floor($n / 2)];
+        $p95 = $times[(int)floor($n * 0.95)];
 
         return [
-            'req_per_sec'      => round($n / $total, 5),
-            'avg'              => round($total / $n, 5),
-            'min'              => round($times[0], 5),
-            'max'              => round($times[$n - 1], 5),
-            'median'           => round($median, 5),
-            'p95'              => round($p95, 5),
+            'req_per_sec' => round($n / $total, 5),
+            'avg' => round($total / $n, 5),
+            'min' => round($times[0], 5),
+            'max' => round($times[$n - 1], 5),
+            'median' => round($median, 5),
+            'p95' => round($p95, 5),
             'avg_connect_time' => round(array_sum($connects) / $n, 5),
-            'avg_ttfb'         => round(array_sum($ttfbs) / $n, 5),
+            'avg_ttfb' => round(array_sum($ttfbs) / $n, 5),
         ];
     }
 
     /** multi-user: set up curl_multi with pipelining/multiplexing, then exec & verify codes */
     private function multiThreaded(array $opts): array
     {
-        $cmh     = curl_multi_init();
+        $cmh = curl_multi_init();
         $threads = $this->config->getThreads();
 
         curl_multi_setopt($cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $threads);
-        curl_multi_setopt($cmh, CURLMOPT_MAX_HOST_CONNECTIONS,  $threads);
+        curl_multi_setopt($cmh, CURLMOPT_MAX_HOST_CONNECTIONS, $threads);
 
         // choose pipelining/multiplex flags
         $pipeline = match ($this->config->getPiping()) {
             'optimal' => $this->config->isHttp2Enabled() ? CURLPIPE_MULTIPLEX : 0,
-            'max'     => CURLPIPE_MULTIPLEX,
+            'max' => CURLPIPE_MULTIPLEX,
         };
         curl_multi_setopt($cmh, CURLMOPT_PIPELINING, $pipeline);
 
         $maxPipe = $this->config->getPiping() === 'optimal'
-            ? (int) ceil($this->config->getCount() / $threads)
+            ? (int)ceil($this->config->getCount() / $threads)
             : $this->config->getCount();
         curl_multi_setopt($cmh, CURLMOPT_MAX_PIPELINE_LENGTH, $maxPipe);
 
