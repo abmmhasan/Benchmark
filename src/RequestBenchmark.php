@@ -276,7 +276,7 @@ final class RequestBenchmark
         return ['req_per_sec' => round($total / $duration, 5)];
     }
 
-    private static function bytesToMB(int $b): float
+    private static function bytesToMB(int|float $b): float
     {
         return round($b / 1_048_576, 2);
     }
