@@ -11,35 +11,41 @@ use AbmmHasan\Benchmark\{
     PipingMode
 };
 
-/* unique-piece configs */
-$c1 = new BenchmarkConfig(
+/* ------------------------------------------------------------------ *
+ *  1)  Define the­ “unique” parts for each target endpoint            *
+ * ------------------------------------------------------------------ */
+$webrick = new BenchmarkConfig(
     url: 'https://localhost.internal/json',
     method: HttpMethod::GET,
+    headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
+    container: 'PHP_8.4',
     name: 'webrick',
 );
-$c2 = new BenchmarkConfig(
+
+$laravel = new BenchmarkConfig(
     url: 'https://local.easy.com.bd/api/json',
     method: HttpMethod::GET,
+    headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
+    container: 'PHP_8.4',
     name: 'laravel',
 );
-$c3 = new BenchmarkConfig(
-    url: 'https://localhost.internal/',
-    method: HttpMethod::GET,
-    expectedStatus: 200,
-    name: 'wr-home',
-);
 
-/* runner with shared defaults (incl. SSL) */
+/* ------------------------------------------------------------------ *
+ *  2)  Build the runner with shared defaults via fluent chain         *
+ * ------------------------------------------------------------------ */
 $runner = BenchmarkRunner::make()
     ->threads(5)
     ->count(500)
     ->piping(PipingMode::Optimal)
     ->timeout(2)
-    ->enableHttp2()
-    ->verifySsl(false)          // ← NEW: toggle to false to allow self-signed
-    ->addConfigs($c1, $c2, $c3);
+    ->enableHttp2(false)
+    ->verifySsl(false)
+    ->addConfigs($webrick, $laravel)
+    ->sampleEvery(1.0);
 
-/* run */
+/* ------------------------------------------------------------------ *
+ *  3)  Execute and print a Markdown comparison table                  *
+ * ------------------------------------------------------------------ */
 echo $runner->runAll('table');

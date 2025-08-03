@@ -9,99 +9,100 @@ use LogicException;
 
 final class BenchmarkRunner
 {
-    /* -------------------------------------------------- *
-     *  Defaults (chain-settable)                         *
-     * -------------------------------------------------- */
+    /* ---------- chain-settable defaults ---------- */
     private ?int $dThreads = null;
     private ?int $dCount = null;
     private ?PipingMode $dPiping = null;
     private ?int $dTimeout = null;
     private ?bool $dHttp2 = null;
     private ?bool $dVerifySsl = null;
+    private ?float $dSampleEvery = null;
 
-    /** @var BenchmarkConfig[]  configs before defaults applied */
+    /** @var BenchmarkConfig[] configs before defaults resolved */
     private array $configs = [];
+    private int $lastProgressLen = 0;
 
     private function __construct() {}
 
-    /** Factory entry-point */
     public static function make(): self
     {
         return new self();
     }
 
-    /* --------- Fluent default setters --------- */
+    /* ---------- fluent defaults ---------- */
 
-    public function threads(int $threads): self
+    public function threads(int $n): self
     {
-        if ($threads < 2) {
-            throw new InvalidArgumentException('Threads must be ≥ 2');
+        if ($n < 2) {
+            throw new InvalidArgumentException('Threads ≥ 2');
         }
-        $this->dThreads = $threads;
+        $this->dThreads = $n;
         return $this;
     }
 
-    public function count(int $count): self
+    public function count(int $n): self
     {
-        if ($count < 100) {
-            throw new InvalidArgumentException('Count must be ≥ 100');
+        if ($n < 100) {
+            throw new InvalidArgumentException('Count ≥ 100');
         }
-        $this->dCount = $count;
+        $this->dCount = $n;
         return $this;
     }
 
-    public function piping(PipingMode $mode): self
+    public function piping(PipingMode $m): self
     {
-        $this->dPiping = $mode;
+        $this->dPiping = $m;
         return $this;
     }
 
-    public function timeout(int $seconds): self
+    public function timeout(int $s): self
     {
-        if ($seconds < 0) {
-            throw new InvalidArgumentException('Timeout must be ≥ 0');
+        if ($s < 0) {
+            throw new InvalidArgumentException('Timeout ≥ 0');
         }
-        $this->dTimeout = $seconds;
+        $this->dTimeout = $s;
         return $this;
     }
 
-    public function enableHttp2(bool $flag = true): self
+    public function enableHttp2(bool $f = true): self
     {
-        $this->dHttp2 = $flag;
+        $this->dHttp2 = $f;
         return $this;
     }
 
-    public function verifySsl(bool $flag = true): self
+    public function verifySsl(bool $f = true): self
     {
-        $this->dVerifySsl = $flag;
+        $this->dVerifySsl = $f;
         return $this;
     }
 
-    /* --------- Add targets --------- */
-
-    public function addConfigs(BenchmarkConfig ...$benchmarkConfigs): self
+    public function sampleEvery(float $sec): self
     {
-        foreach ($benchmarkConfigs as $cfg) {
+        if ($sec <= 0) {
+            throw new InvalidArgumentException('sampleEvery > 0');
+        }
+        $this->dSampleEvery = $sec;
+        return $this;
+    }
+
+    public function addConfigs(BenchmarkConfig ...$c): self
+    {
+        foreach ($c as $cfg) {
             $this->configs[$cfg->getName()] = $cfg;
         }
         return $this;
     }
 
-    /* ================================================== *
-     *  Public API – run benchmarks                       *
-     * ================================================== */
+    /* ---------- public API ---------- */
 
-    /**
-     * @param 'array'|'json'|'table'|'csv' $format
-     * @return array|string
-     */
+    /** @param 'array'|'json'|'table'|'csv' $format */
     public function runAll(string $format = 'array'): array|string
     {
         if ($this->dThreads === null) {
-            throw new LogicException('Default threads not set. Call ->threads(#) first.');
+            throw new LogicException('call ->threads()');
         }
         if ($this->dCount === null) {
-            throw new LogicException('Default count not set. Call ->count(#) first.');
+            throw new LogicException('call ->count()');
         }
 
         $data = $this->runAllRaw();
@@ -111,113 +112,172 @@ final class BenchmarkRunner
             'table' => $this->toMarkdownTable($data),
             'csv' => $this->toCsv($data),
             'array' => $data,
-            default => throw new InvalidArgumentException("Unknown format: {$format}"),
+            default => throw new InvalidArgumentException("Unknown format: $format"),
         };
     }
 
-    /* -------------------------------------------------- *
-     *  Internals                                         *
-     * -------------------------------------------------- */
+    /* ---------- core ---------- */
 
-    /** @return array<string, array> */
     private function runAllRaw(): array
     {
         $out = [];
+        $total = count($this->configs);
+        $done = 0;
 
-        foreach ($this->configs as $name => $cfg) {
-            $cfg = $this->applyDefaults($cfg);
-            $out[$name] = new RequestBenchmark($cfg)->run();
+        foreach ($this->configs as $name => $cfgRaw) {
+            $cfg = $this->applyDefaults($cfgRaw);
+
+            $this->progress($done++, $total, "Running $name");
+
+            /* optional container sampler */
+            $sampler = $cfg->getContainer()
+                ? new ContainerStats($cfg->getContainer(), $cfg->getSampleInterval())
+                : null;
+
+            $benchStats = new RequestBenchmark($cfg, $sampler)->run();
+            if ($sampler) {
+                $benchStats['container'] = $sampler->finish();
+            }
+
+            $benchStats['score'] = $this->score($benchStats);
+            $out[$name] = $benchStats;
+
+            unset($benchStats, $sampler);
+
+            if ($done < $total) {
+                $this->progress($done, $total, "Cool-down 5s");
+                gc_collect_cycles();
+                sleep(5);
+            }
         }
+        $this->progress($total, $total, "done");  // newline
+        /* rank by descending score */
+        uasort($out, fn($a, $b) => $b['score'] <=> $a['score']);
+        $rank = 1;
+        foreach ($out as &$v) {
+            $v['rank'] = $rank++;
+        }
+
         return $out;
     }
+
+    /* ---------- helpers ---------- */
+
+    /** very naive scoring: favour high RPS, penalise high avg latency */
+    private function score(array $s): float
+    {
+        return $s['multiple']['req_per_sec'] * 1000
+            - $s['single']['avg'] * 100;
+    }
+
+    /** simple text progress bar to STDERR */
+    private function progress(int $done, int $total, string $msg): void
+    {
+        /* build new line */
+        $pct   = intdiv($done * 100, $total);
+        $bars  = intdiv($pct, 5);                 // 20-char bar
+        $line  = sprintf(
+            "[%s%s] %3d%% %s",
+            str_repeat('#', $bars),
+            str_repeat('-', 20 - $bars),
+            $pct,
+            $msg
+        );
+
+        /* pad with spaces to fully erase the previous line */
+        $padded = str_pad($line, $this->lastProgressLen);
+
+        fwrite(STDERR, "\r{$padded}");
+        $this->lastProgressLen = strlen($line);
+
+        if ($done === $total) {
+            fwrite(STDERR, PHP_EOL);
+            $this->lastProgressLen = 0;           // reset for next run
+        }
+    }
+
+    /* ---------- default resolver ---------- */
 
     private function applyDefaults(BenchmarkConfig $cfg): BenchmarkConfig
     {
         $threads = $cfg->getThreads() ?? $this->dThreads;
         $count = $cfg->getCount() ?? $this->dCount;
-        $piping = $cfg->getPiping() ?? $this->dPiping ?? PipingMode::Optimal;
-        $timeout = $cfg->getTimeout() ?? $this->dTimeout ?? 1;
-        $enableH2 = $cfg->isHttp2Enabled() ?? $this->dHttp2 ?? false;
-        $verifySsl = $cfg->isVerifySsl() ?? $this->dVerifySsl ?? true;
-
         if ($count < $threads) {
-            throw new InvalidArgumentException("Count ({$count}) must be ≥ threads ({$threads})");
+            throw new InvalidArgumentException("Count $count < threads $threads");
         }
 
-        // build a *new* config with concrete values
         return new BenchmarkConfig(
             url: $cfg->getUrl(),
             method: $cfg->getMethod(),
             headers: $cfg->getHeaders(),
             body: $cfg->getBody(),
             expectedStatus: $cfg->getExpectedStatus(),
+
             threads: $threads,
             count: $count,
-            piping: $piping,
-            timeout: $timeout,
-            enableHttp2: $enableH2,
-            verifySsl: $verifySsl,
+            piping: $cfg->getPiping() ?? $this->dPiping ?? PipingMode::Optimal,
+            timeout: $cfg->getTimeout() ?? $this->dTimeout ?? 1,
+            enableHttp2: $cfg->isHttp2Enabled() ?? $this->dHttp2 ?? false,
+            verifySsl: $cfg->isVerifySsl() ?? $this->dVerifySsl ?? true,
+
+            container: $cfg->getContainer(),
+            sampleEvery: $cfg->getSampleInterval() ?? $this->dSampleEvery ?? 1.0,
+
             curlOptions: $cfg->getCurlOptions(),
             name: $cfg->getName(),
             skipPreflight: $cfg->skipPreflight(),
         );
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Helpers: Markdown & CSV                                            */
-    /* ------------------------------------------------------------------ */
+    /* ---------- output helpers (only preferred list changed) ---------- */
 
-    private function toMarkdownTable(array $data): string
+    private function toMarkdownTable(array $d): string
     {
-        [$header, $rows] = $this->flatten($data);
-
-        $separator = '| ' . implode(' | ', array_fill(0, count($header), '---')) . ' |';
-        $tableRows = array_map(
-            static fn($r) => '| ' . implode(' | ', $r) . ' |',
-            $rows,
-        );
-
-        return implode("\n", [
-                '| ' . implode(' | ', $header) . ' |',
-                $separator,
-                ...$tableRows,
-            ]) . "\n";
+        [$h, $rows] = $this->flatten($d);
+        $sep = '| ' . implode(' | ', array_fill(0, count($h), '---')) . ' |';
+        $lines = array_map(fn($r) => '| ' . implode(' | ', $r) . ' |', $rows);
+        return implode("\n", ['| ' . implode(' | ', $h) . ' |', $sep, ...$lines]) . "\n";
     }
 
-    private function toCsv(array $data): string
+    private function toCsv(array $d): string
     {
-        [$header, $rows] = $this->flatten($data);
-
-        $fh = fopen('php://memory', 'r+');
-        fputcsv($fh, $header);
-        foreach ($rows as $row) {
-            fputcsv($fh, $row);
+        [$h, $rows] = $this->flatten($d);
+        $f = fopen('php://memory', 'r+');
+        fputcsv($f, $h);
+        foreach ($rows as $r) {
+            fputcsv($f, $r);
         }
-        rewind($fh);
-        return stream_get_contents($fh);
+        rewind($f);
+        return stream_get_contents($f);
     }
 
-    /**
-     * Flatten nested metric arrays and return [$header, $rows] ready for
-     * Markdown or CSV emission.
-     */
     private function flatten(array $data): array
     {
-        // 1) flatten each benchmark
         $flat = [];
-        foreach ($data as $name => $result) {
-            $map = ['totalDuration' => $result['totalDuration']];
-            foreach ($result['single'] as $m => $v) {
-                $map["single.$m"] = $v;
+        foreach ($data as $name => $res) {
+            $m = [
+                'rank' => $res['rank'],
+                'score' => $res['score'],
+                'totalDuration' => $res['totalDuration'],
+                'remoteMemoryMB' => $res['remoteMemoryMB'],
+            ];
+            foreach ($res['single'] as $k => $v) {
+                $m["single.$k"] = $v;
             }
-            foreach ($result['multiple'] as $m => $v) {
-                $map["multiple.$m"] = $v;
+            foreach ($res['multiple'] as $k => $v) {
+                $m["multiple.$k"] = $v;
             }
-            $flat[$name] = $map;
+            if (isset($res['container'])) {
+                foreach ($res['container'] as $k => $v) {
+                    $m["container.$k"] = $v;
+                }
+            }
+            $flat[$name] = $m;
         }
 
-        // 2) collect unique metric keys – preserve a sensible order
         $preferred = [
+            'rank',
+            'score',
             'single.req_per_sec',
             'single.avg',
             'single.p95',
@@ -228,21 +288,22 @@ final class BenchmarkRunner
             'single.avg_ttfb',
             'multiple.req_per_sec',
             'totalDuration',
+            'remoteMemoryMB',
+            'container.avgMemMB',
+            'container.avgCPU',
         ];
-        $allMetrics = array_keys(array_reduce($flat, static fn($c, $m) => $c + $m, []));
-        $metrics = array_values(array_unique([...$preferred, ...$allMetrics]));
+        $all = array_keys(array_reduce($flat, fn($c, $m) => $c + $m, []));
+        $metrics = array_values(array_unique([...$preferred, ...$all]));
 
-        // 3) build header + rows
         $header = ['Metric', ...array_keys($flat)];
         $rows = [];
-        foreach ($metrics as $metric) {
-            $cells = [$metric];
-            foreach ($flat as $name => $map) {
-                $cells[] = $map[$metric] ?? '';
+        foreach ($metrics as $m) {
+            $row = [$m];
+            foreach ($flat as $map) {
+                $row[] = $map[$m] ?? '';
             }
-            $rows[] = $cells;
+            $rows[] = $row;
         }
-
         return [$header, $rows];
     }
 }
