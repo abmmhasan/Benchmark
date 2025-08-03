@@ -32,6 +32,15 @@ $laravel = new BenchmarkConfig(
     name: 'laravel',
 );
 
+$raw = new BenchmarkConfig(
+    url: 'https://test.local',
+    method: HttpMethod::GET,
+    headers: ['Accept' => 'application/json'],
+    expectedStatus: 200,
+    container: 'PHP_8.4',
+    name: 'raw',
+);
+
 /* ------------------------------------------------------------------ *
  *  2)  Build the runner with shared defaults via fluent chain         *
  * ------------------------------------------------------------------ */
@@ -42,7 +51,7 @@ $runner = BenchmarkRunner::make()
     ->timeout(2)
     ->enableHttp2(false)
     ->verifySsl(false)
-    ->addConfigs($webrick, $laravel)
+    ->addConfigs($raw, $laravel,$webrick)
     ->sampleEvery(1.0);
 
 /* ------------------------------------------------------------------ *

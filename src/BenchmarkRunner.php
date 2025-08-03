@@ -18,7 +18,7 @@ final class BenchmarkRunner
     private ?bool $dVerifySsl = null;
     private ?float $dSampleEvery = null;
 
-    /** @var BenchmarkConfig[] configs before defaults resolved */
+    /** @var BenchmarkConfig[] */
     private array $configs = [];
     private int $lastProgressLen = 0;
 
@@ -29,8 +29,7 @@ final class BenchmarkRunner
         return new self();
     }
 
-    /* ---------- fluent defaults ---------- */
-
+    /* ---------- fluent setters ---------- */
     public function threads(int $n): self
     {
         if ($n < 2) {
@@ -76,12 +75,12 @@ final class BenchmarkRunner
         return $this;
     }
 
-    public function sampleEvery(float $sec): self
+    public function sampleEvery(float $s): self
     {
-        if ($sec <= 0) {
+        if ($s <= 0) {
             throw new InvalidArgumentException('sampleEvery > 0');
         }
-        $this->dSampleEvery = $sec;
+        $this->dSampleEvery = $s;
         return $this;
     }
 
@@ -94,7 +93,6 @@ final class BenchmarkRunner
     }
 
     /* ---------- public API ---------- */
-
     /** @param 'array'|'json'|'table'|'csv' $format */
     public function runAll(string $format = 'array'): array|string
     {
@@ -116,8 +114,9 @@ final class BenchmarkRunner
         };
     }
 
-    /* ---------- core ---------- */
-
+    /* -------------------------------------------------- *
+     *  Core driver                                       *
+     * -------------------------------------------------- */
     private function runAllRaw(): array
     {
         $out = [];
@@ -126,78 +125,87 @@ final class BenchmarkRunner
 
         foreach ($this->configs as $name => $cfgRaw) {
             $cfg = $this->applyDefaults($cfgRaw);
+            ++$done;
 
-            $this->progress($done++, $total, "Running $name");
+            /* ---------- always restart container first ---------- */
+            if ($cfg->getContainer()) {
+                $cName = $cfg->getContainer();
+                $this->progress("Restarting $cName");
+                shell_exec(sprintf('docker restart %s >/dev/null 2>&1', escapeshellarg($cName)));
 
-            /* optional container sampler */
+                /* wait ≤30 s for .State.Running==true */
+                $start = microtime(true);
+                do {
+                    $running = trim(
+                        shell_exec(
+                            sprintf('docker inspect -f {{.State.Running}} %s 2>/dev/null', escapeshellarg($cName)),
+                        ) ?? '',
+                    );
+                    if ($running === 'true') {
+                        break;
+                    }
+                    usleep(300_000);
+                } while (microtime(true) - $start < 30);
+
+                /* short warm-up */
+                $this->progress('Warm-up 3 s');
+                sleep(3);
+            }
+
+            /* ---------- run benchmark ---------- */
+            $this->progress("Running $name");
+
             $sampler = $cfg->getContainer()
                 ? new ContainerStats($cfg->getContainer(), $cfg->getSampleInterval())
                 : null;
 
-            $benchStats = new RequestBenchmark($cfg, $sampler)->run();
+            $stats = new RequestBenchmark($cfg, $sampler)->run();
             if ($sampler) {
-                $benchStats['container'] = $sampler->finish();
+                $stats['container'] = $sampler->finish();
             }
+            $stats['score'] = $this->score($stats);
+            $out[$name] = $stats;
 
-            $benchStats['score'] = $this->score($benchStats);
-            $out[$name] = $benchStats;
-
-            unset($benchStats, $sampler);
-
+            /* ---------- cool-down between configs ---------- */
             if ($done < $total) {
-                $this->progress($done, $total, "Cool-down 5s");
                 gc_collect_cycles();
+                $this->progress('Cool-down 5s');
                 sleep(5);
             }
         }
-        $this->progress($total, $total, "done");  // newline
-        /* rank by descending score */
+
+        /* rank by score */
         uasort($out, fn($a, $b) => $b['score'] <=> $a['score']);
         $rank = 1;
         foreach ($out as &$v) {
             $v['rank'] = $rank++;
         }
 
+        $this->progress("Process complete");
+
         return $out;
     }
 
     /* ---------- helpers ---------- */
-
-    /** very naive scoring: favour high RPS, penalise high avg latency */
     private function score(array $s): float
     {
         return $s['multiple']['req_per_sec'] * 1000
             - $s['single']['avg'] * 100;
     }
 
-    /** simple text progress bar to STDERR */
-    private function progress(int $done, int $total, string $msg): void
+    private function progress(string $msg): void
     {
-        /* build new line */
-        $pct   = intdiv($done * 100, $total);
-        $bars  = intdiv($pct, 5);                 // 20-char bar
-        $line  = sprintf(
-            "[%s%s] %3d%% %s",
-            str_repeat('#', $bars),
-            str_repeat('-', 20 - $bars),
-            $pct,
-            $msg
+        $line = sprintf(
+            '[%s] %s',
+            date('Y-m-d H:i:s'),
+            $msg,
         );
-
-        /* pad with spaces to fully erase the previous line */
-        $padded = str_pad($line, $this->lastProgressLen);
-
-        fwrite(STDERR, "\r{$padded}");
-        $this->lastProgressLen = strlen($line);
-
-        if ($done === $total) {
-            fwrite(STDERR, PHP_EOL);
-            $this->lastProgressLen = 0;           // reset for next run
-        }
+        $pad = str_pad($line, $this->lastProgressLen);
+        fwrite(STDERR, "\r{$pad}");
+        $this->lastProgressLen = max(strlen($line), $this->lastProgressLen);
     }
 
     /* ---------- default resolver ---------- */
-
     private function applyDefaults(BenchmarkConfig $cfg): BenchmarkConfig
     {
         $threads = $cfg->getThreads() ?? $this->dThreads;
@@ -229,8 +237,7 @@ final class BenchmarkRunner
         );
     }
 
-    /* ---------- output helpers (only preferred list changed) ---------- */
-
+    /* ---------- output helpers ---------- */
     private function toMarkdownTable(array $d): string
     {
         [$h, $rows] = $this->flatten($d);
@@ -297,10 +304,10 @@ final class BenchmarkRunner
 
         $header = ['Metric', ...array_keys($flat)];
         $rows = [];
-        foreach ($metrics as $m) {
-            $row = [$m];
+        foreach ($metrics as $metric) {
+            $row = [$metric];
             foreach ($flat as $map) {
-                $row[] = $map[$m] ?? '';
+                $row[] = $map[$metric] ?? '';
             }
             $rows[] = $row;
         }
