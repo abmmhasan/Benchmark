@@ -47,11 +47,11 @@ final class RequestBenchmark
     /** Base curl options common to both modes (no pipelining here). */
     private function baseCurlOptions(): array
     {
-        return [
-//                CURLOPT_SSL_VERIFYHOST => 2,
-//                CURLOPT_SSL_VERIFYPEER => true,
-                CURLOPT_SSL_VERIFYHOST => 0,
-                CURLOPT_SSL_VERIFYPEER => 0,
+        $sslOpts = $this->config->isVerifySsl()
+            ? [CURLOPT_SSL_VERIFYHOST => 2, CURLOPT_SSL_VERIFYPEER => true]
+            : [CURLOPT_SSL_VERIFYHOST => 0, CURLOPT_SSL_VERIFYPEER => false];
+
+        return $sslOpts + [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_ENCODING => '',
                 CURLOPT_FOLLOWLOCATION => false,

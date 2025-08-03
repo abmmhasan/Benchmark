@@ -5,27 +5,105 @@ declare(strict_types=1);
 namespace AbmmHasan\Benchmark;
 
 use InvalidArgumentException;
+use LogicException;
 
 final class BenchmarkRunner
 {
-    /** @var RequestBenchmark[] */
-    private array $benchmarks = [];
+    /* -------------------------------------------------- *
+     *  Defaults (chain-settable)                         *
+     * -------------------------------------------------- */
+    private ?int $dThreads = null;
+    private ?int $dCount = null;
+    private ?PipingMode $dPiping = null;
+    private ?int $dTimeout = null;
+    private ?bool $dHttp2 = null;
+    private ?bool $dVerifySsl = null;
 
-    public function __construct(BenchmarkConfig ...$configs)
+    /** @var BenchmarkConfig[]  configs before defaults applied */
+    private array $configs = [];
+
+    private function __construct() {}
+
+    /** Factory entry-point */
+    public static function make(): self
     {
-        foreach ($configs as $cfg) {
-            $this->benchmarks[$cfg->getName()] = new RequestBenchmark($cfg);
-        }
+        return new self();
     }
 
+    /* --------- Fluent default setters --------- */
+
+    public function threads(int $threads): self
+    {
+        if ($threads < 2) {
+            throw new InvalidArgumentException('Threads must be ≥ 2');
+        }
+        $this->dThreads = $threads;
+        return $this;
+    }
+
+    public function count(int $count): self
+    {
+        if ($count < 100) {
+            throw new InvalidArgumentException('Count must be ≥ 100');
+        }
+        $this->dCount = $count;
+        return $this;
+    }
+
+    public function piping(PipingMode $mode): self
+    {
+        $this->dPiping = $mode;
+        return $this;
+    }
+
+    public function timeout(int $seconds): self
+    {
+        if ($seconds < 0) {
+            throw new InvalidArgumentException('Timeout must be ≥ 0');
+        }
+        $this->dTimeout = $seconds;
+        return $this;
+    }
+
+    public function enableHttp2(bool $flag = true): self
+    {
+        $this->dHttp2 = $flag;
+        return $this;
+    }
+
+    public function verifySsl(bool $flag = true): self
+    {
+        $this->dVerifySsl = $flag;
+        return $this;
+    }
+
+    /* --------- Add targets --------- */
+
+    public function addConfigs(BenchmarkConfig ...$benchmarkConfigs): self
+    {
+        foreach ($benchmarkConfigs as $cfg) {
+            $this->configs[$cfg->getName()] = $cfg;
+        }
+        return $this;
+    }
+
+    /* ================================================== *
+     *  Public API – run benchmarks                       *
+     * ================================================== */
+
     /**
-     * Run all benchmarks and format the output.
-     *
      * @param 'array'|'json'|'table'|'csv' $format
      * @return array|string
      */
     public function runAll(string $format = 'array'): array|string
     {
+        if ($this->dThreads === null) {
+            throw new LogicException('Default threads not set. Call ->threads(#) first.');
+        }
+        if ($this->dCount === null) {
+            throw new LogicException('Default count not set. Call ->count(#) first.');
+        }
+
         $data = $this->runAllRaw();
 
         return match ($format) {
@@ -37,14 +115,52 @@ final class BenchmarkRunner
         };
     }
 
-    /** @return array<string, array> raw results keyed by config name */
+    /* -------------------------------------------------- *
+     *  Internals                                         *
+     * -------------------------------------------------- */
+
+    /** @return array<string, array> */
     private function runAllRaw(): array
     {
         $out = [];
-        foreach ($this->benchmarks as $name => $bench) {
-            $out[$name] = $bench->run();
+
+        foreach ($this->configs as $name => $cfg) {
+            $cfg = $this->applyDefaults($cfg);
+            $out[$name] = new RequestBenchmark($cfg)->run();
         }
         return $out;
+    }
+
+    private function applyDefaults(BenchmarkConfig $cfg): BenchmarkConfig
+    {
+        $threads = $cfg->getThreads() ?? $this->dThreads;
+        $count = $cfg->getCount() ?? $this->dCount;
+        $piping = $cfg->getPiping() ?? $this->dPiping ?? PipingMode::Optimal;
+        $timeout = $cfg->getTimeout() ?? $this->dTimeout ?? 1;
+        $enableH2 = $cfg->isHttp2Enabled() ?? $this->dHttp2 ?? false;
+        $verifySsl = $cfg->isVerifySsl() ?? $this->dVerifySsl ?? true;
+
+        if ($count < $threads) {
+            throw new InvalidArgumentException("Count ({$count}) must be ≥ threads ({$threads})");
+        }
+
+        // build a *new* config with concrete values
+        return new BenchmarkConfig(
+            url: $cfg->getUrl(),
+            method: $cfg->getMethod(),
+            headers: $cfg->getHeaders(),
+            body: $cfg->getBody(),
+            expectedStatus: $cfg->getExpectedStatus(),
+            threads: $threads,
+            count: $count,
+            piping: $piping,
+            timeout: $timeout,
+            enableHttp2: $enableH2,
+            verifySsl: $verifySsl,
+            curlOptions: $cfg->getCurlOptions(),
+            name: $cfg->getName(),
+            skipPreflight: $cfg->skipPreflight(),
+        );
     }
 
     /* ------------------------------------------------------------------ */
