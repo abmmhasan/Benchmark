@@ -45,8 +45,8 @@ $raw = new BenchmarkConfig(
  *  2)  Build the runner with shared defaults via fluent chain         *
  * ------------------------------------------------------------------ */
 $runner = BenchmarkRunner::make()
-    ->threads(5)
-    ->count(500)
+    ->threads(100)
+    ->count(5000)
     ->piping(PipingMode::Optimal)
     ->timeout(2)
     ->enableHttp2(false)

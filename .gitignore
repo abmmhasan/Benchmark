@@ -2,3 +2,7 @@
 .idea
 example.php
 composer.lock
+*.md
+*.log
+*.pdf
+docs.txt
