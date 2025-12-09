@@ -77,8 +77,8 @@ final class BenchmarkRunner
 
     public function sampleEvery(float $s): self
     {
-        if ($s <= 0) {
-            throw new InvalidArgumentException('sampleEvery > 0');
+        if ($s < 1) {
+            throw new InvalidArgumentException('sampleEvery >= 1');
         }
         $this->dSampleEvery = $s;
         return $this;
