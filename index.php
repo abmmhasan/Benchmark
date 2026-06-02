@@ -15,7 +15,7 @@ use AbmmHasan\Benchmark\{
  *  1)  Define the­ “unique” parts for each target endpoint            *
  * ------------------------------------------------------------------ */
 $webrick = new BenchmarkConfig(
-    url: 'https://localhost.internal/json',
+    url: 'https://webrick.localhost/json',
     method: HttpMethod::GET,
     headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
@@ -24,7 +24,7 @@ $webrick = new BenchmarkConfig(
 );
 
 $laravel = new BenchmarkConfig(
-    url: 'https://local.easy.com.bd/api/json',
+    url: 'https://kam.sslcommerz.localhost/api/json',
     method: HttpMethod::GET,
     headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
@@ -33,7 +33,7 @@ $laravel = new BenchmarkConfig(
 );
 
 $raw = new BenchmarkConfig(
-    url: 'https://test.local',
+    url: 'https://test.localhost',
     method: HttpMethod::GET,
     headers: ['Accept' => 'application/json'],
     expectedStatus: 200,
@@ -51,7 +51,7 @@ $runner = BenchmarkRunner::make()
     ->timeout(2)
     ->enableHttp2(false)
     ->verifySsl(false)
-    ->addConfigs($raw, $laravel,$webrick)
+    ->addConfigs($raw, $laravel, $webrick)
     ->sampleEvery(1.0);
 
 /* ------------------------------------------------------------------ *
