@@ -11,6 +11,18 @@ use AbmmHasan\Benchmark\{
     PipingMode
 };
 
+$validJsonResponse = static function (string $response): bool {
+    try {
+        $payload = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        return false;
+    }
+
+    return is_array($payload)
+        && isset($payload['memory'])
+        && is_numeric($payload['memory']);
+};
+
 /* ------------------------------------------------------------------ *
  *  1)  Define the­ “unique” parts for each target endpoint            *
  * ------------------------------------------------------------------ */
@@ -21,6 +33,7 @@ $webrick = new BenchmarkConfig(
     expectedStatus: 200,
     container: 'PHP_8.4',
     name: 'webrick',
+    responseValidator: $validJsonResponse,
 );
 
 $laravel = new BenchmarkConfig(
@@ -30,6 +43,17 @@ $laravel = new BenchmarkConfig(
     expectedStatus: 200,
     container: 'PHP_8.4',
     name: 'laravel',
+    responseValidator: $validJsonResponse,
+);
+
+$infbyte = new BenchmarkConfig(
+    url: 'https://inf.localhost/json',
+    method: HttpMethod::GET,
+    headers: ['Accept' => 'application/json'],
+    expectedStatus: 200,
+    container: 'PHP_8.4',
+    name: 'infbyte',
+    responseValidator: $validJsonResponse,
 );
 
 $raw = new BenchmarkConfig(
@@ -39,6 +63,7 @@ $raw = new BenchmarkConfig(
     expectedStatus: 200,
     container: 'PHP_8.4',
     name: 'raw',
+    responseValidator: $validJsonResponse,
 );
 
 /* ------------------------------------------------------------------ *
@@ -47,11 +72,12 @@ $raw = new BenchmarkConfig(
 $runner = BenchmarkRunner::make()
     ->threads(100)
     ->count(5000)
+    ->minimumDuration(10)
     ->piping(PipingMode::Optimal)
     ->timeout(2)
     ->enableHttp2(false)
     ->verifySsl(false)
-    ->addConfigs($raw, $laravel, $webrick)
+    ->addConfigs($raw, $laravel, $webrick, $infbyte)
     ->sampleEvery(1.0);
 
 /* ------------------------------------------------------------------ *

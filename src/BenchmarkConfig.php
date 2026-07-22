@@ -4,25 +4,8 @@ declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
 
+use Closure;
 use InvalidArgumentException;
-
-/* ---------- enums ---------- */
-
-enum HttpMethod: string
-{
-    case GET = 'GET';
-    case POST = 'POST';
-    case PUT = 'PUT';
-    case DELETE = 'DELETE';
-    case HEAD = 'HEAD';
-    case PATCH = 'PATCH';
-}
-
-enum PipingMode: string
-{
-    case Optimal = 'optimal';
-    case Max = 'max';
-}
 
 /* ------------------------------------------------------------------ */
 /*  Immutable DTO with optional Docker-stats fields                   */
@@ -31,6 +14,11 @@ enum PipingMode: string
 
 final class BenchmarkConfig
 {
+    public const MAX_COUNT = 1_000_000;
+    public const MAX_THREADS = 1_000;
+    public const MAX_TIMEOUT_SECONDS = 3_600;
+    public const MAX_PHASE_DURATION_SECONDS = 600;
+
     /* -------- unique per-request -------- */
     private string $name;
     private string $url;
@@ -54,6 +42,7 @@ final class BenchmarkConfig
     /* -------- misc -------- */
     private array $curlOptions;
     private bool $skipPreflight;
+    private Closure $responseValidator;
 
     public function __construct(
         string $url,
@@ -70,11 +59,12 @@ final class BenchmarkConfig
         ?bool $verifySsl = null,
 
         ?string $container = null,
-        ?float $sampleEvery = 1.0,
+        ?float $sampleEvery = null,
 
         array $curlOptions = [],
         ?string $name = null,
         bool $skipPreflight = false,
+        ?callable $responseValidator = null,
     ) {
         /* ---------- basic validation ---------- */
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
@@ -83,20 +73,23 @@ final class BenchmarkConfig
         if ($expectedStatus < 100 || $expectedStatus >= 500) {
             throw new InvalidArgumentException("Invalid expected status: {$expectedStatus}");
         }
-        if ($threads !== null && $threads < 2) {
-            throw new InvalidArgumentException('Threads must be ≥ 2');
+        if ($threads !== null && ($threads < 2 || $threads > self::MAX_THREADS)) {
+            throw new InvalidArgumentException(sprintf('Threads must be between 2 and %d', self::MAX_THREADS));
         }
-        if ($count !== null && $count < 100) {
-            throw new InvalidArgumentException('Count must be ≥ 100');
+        if ($count !== null && ($count < 100 || $count > self::MAX_COUNT)) {
+            throw new InvalidArgumentException(sprintf('Count must be between 100 and %d', self::MAX_COUNT));
         }
         if ($threads !== null && $count !== null && $count < $threads) {
             throw new InvalidArgumentException("Count ({$count}) must be ≥ threads ({$threads})");
         }
-        if ($timeout !== null && $timeout < 0) {
-            throw new InvalidArgumentException('Timeout must be ≥ 0');
+        if ($timeout !== null && ($timeout < 1 || $timeout > self::MAX_TIMEOUT_SECONDS)) {
+            throw new InvalidArgumentException(sprintf('Timeout must be between 1 and %d seconds', self::MAX_TIMEOUT_SECONDS));
         }
-        if ($sampleEvery !== null && $sampleEvery <= 0) {
-            throw new InvalidArgumentException('sampleEvery must be > 0');
+        if ($sampleEvery !== null && $sampleEvery < 1) {
+            throw new InvalidArgumentException('sampleEvery must be ≥ 1 second');
+        }
+        if ($responseValidator === null) {
+            throw new InvalidArgumentException('A response validator is required so only correct responses count as successful');
         }
 
         $headers = $headers ?: ['Cache-Control' => 'no-cache'];
@@ -121,6 +114,7 @@ final class BenchmarkConfig
         $this->curlOptions = $curlOptions;
         $this->skipPreflight = $skipPreflight;
         $this->name = $name ?? $url;
+        $this->responseValidator = Closure::fromCallable($responseValidator);
     }
 
     /* ---------- getters ---------- */
@@ -204,5 +198,11 @@ final class BenchmarkConfig
     public function skipPreflight(): bool
     {
         return $this->skipPreflight;
+    }
+
+    /** @return Closure(string, array<string, mixed>):bool */
+    public function getResponseValidator(): Closure
+    {
+        return $this->responseValidator;
     }
 }

@@ -4,280 +4,594 @@ declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
 
-use CurlMultiHandle;
-use Exception;
+use Closure;
+use JsonException;
+use LogicException;
+use RuntimeException;
+use Throwable;
 
-/**
- * Executes the actual HTTP traffic for one concrete BenchmarkConfig and
- * returns latency/RPS statistics (single-thread + multi-thread).
- *
- * Container-level memory/CPU collection is handled by BenchmarkRunner and
- * merged into the final stats – this class remains unaware of it.
- */
+/** Executes and classifies HTTP benchmark traffic for one resolved configuration. */
 final class RequestBenchmark
 {
-    private array $remoteMem = [];
+    private float $remoteMemoryTotal = 0.0;
+    private int $remoteMemorySamples = 0;
+
+    private readonly ?Closure $progress;
 
     public function __construct(
         private readonly BenchmarkConfig $config,
-        private readonly ?ContainerStats $sampler = null,
-    ) {}
+        ?callable $progress = null,
+    ) {
+        $this->progress = $progress === null ? null : Closure::fromCallable($progress);
+        if (
+            $config->getThreads() === null
+            || $config->getCount() === null
+            || $config->getPiping() === null
+            || $config->getTimeout() === null
+        ) {
+            throw new LogicException('RequestBenchmark requires a configuration with resolved runtime defaults');
+        }
+    }
 
-    /** Run the full benchmark and return metrics array. */
+    /** Run one serial and one configured-concurrency measurement. */
     public function run(): array
     {
-        $opts = $this->prepareOptions();
+        $this->resetMeasurements();
 
         if (!$this->config->skipPreflight()) {
-            $this->checkConnection($opts);
+            $this->preflight();
         }
 
-        $t0 = microtime(true);
-        $single = $this->singleThreaded($opts);
-        $total = round(microtime(true) - $t0, 5);
-        $this->sampler?->maybeSample();
-        $t0 = microtime(true);
-        $multi = $this->multiThreaded($opts);
-        $total += round(microtime(true) - $t0, 5);
-        $this->sampler?->maybeSample();
+        $startedAt = hrtime(true);
+        $single = $this->runSingleThreaded();
+        $multiple = $this->runConcurrent($this->config->getThreads());
 
         return [
             'name' => $this->config->getName(),
             'single' => $single,
-            'multiple' => $multi,
-            'totalDuration' => $total,
-            'remoteMemoryMB' => $this->remoteMem ? self::bytesToMB(array_sum($this->remoteMem) / count($this->remoteMem)) : null,
+            'multiple' => $multiple,
+            'totalDuration' => self::secondsSince($startedAt),
+            'remoteMemoryMB' => $this->getRemoteMemoryMB(),
         ];
     }
 
-    /* --------------------------------------------------------------------- *
-     *  Internals                                                            *
-     * --------------------------------------------------------------------- */
+    /** Perform a non-mutating connectivity probe. */
+    public function preflight(): void
+    {
+        $options = $this->prepareOptions();
+        unset($options[CURLOPT_POSTFIELDS]);
+        $options[CURLOPT_CUSTOMREQUEST] = HttpMethod::HEAD->value;
+        $options[CURLOPT_NOBODY] = true;
 
-    /** Base curl options common to single & multi modes. */
+        $handle = curl_init();
+        try {
+            if (!curl_setopt_array($handle, $options)) {
+                throw new RuntimeException('Unable to configure the preflight request');
+            }
+
+            $response = curl_exec($handle);
+            $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+            if ($response === false || $status === 0) {
+                throw new RuntimeException(sprintf(
+                    'Connectivity failed (%s): [%d] %s',
+                    $this->config->getUrl(),
+                    curl_errno($handle),
+                    curl_error($handle),
+                ));
+            }
+            if ($status >= 500) {
+                throw new RuntimeException(sprintf(
+                    'Endpoint is not ready (%s): HTTP %d',
+                    $this->config->getUrl(),
+                    $status,
+                ));
+            }
+        } finally {
+            curl_close($handle);
+        }
+    }
+
+    /** Warm safe read-only endpoints without including the traffic in results. */
+    public function warmUp(int $requests): void
+    {
+        if ($requests < 0) {
+            throw new LogicException('Warm-up request count cannot be negative');
+        }
+        if ($requests === 0) {
+            return;
+        }
+        if (!in_array($this->config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)) {
+            throw new LogicException('Automatic warm-up is only safe for GET and HEAD benchmarks');
+        }
+
+        $options = $this->prepareOptions();
+        $handle = curl_init();
+        try {
+            for ($i = 0; $i < $requests; ++$i) {
+                if ($i > 0) {
+                    curl_reset($handle);
+                }
+                if (!curl_setopt_array($handle, $options)) {
+                    throw new RuntimeException('Unable to configure a warm-up request');
+                }
+
+                $response = curl_exec($handle);
+                $info = curl_getinfo($handle);
+                $failure = $this->classify($response, $info, curl_errno($handle));
+                if ($failure !== null) {
+                    $detail = match ($failure) {
+                        'status' => sprintf(
+                            'expected HTTP %d, received HTTP %d',
+                            $this->config->getExpectedStatus(),
+                            (int) ($info['http_code'] ?? 0),
+                        ),
+                        'timeout' => 'request timed out',
+                        'transfer' => sprintf('[%d] %s', curl_errno($handle), curl_error($handle)),
+                        'validation' => 'response validator rejected the body',
+                    };
+                    throw new RuntimeException("Warm-up request failed validation: {$detail}");
+                }
+            }
+        } finally {
+            curl_close($handle);
+        }
+    }
+
+    /**
+     * Validate the configured status and response contract before measurement.
+     * Mutating methods receive connectivity validation only to avoid side effects.
+     */
+    public function validateTarget(): void
+    {
+        if (!in_array($this->config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)) {
+            return;
+        }
+
+        try {
+            $this->warmUp(1);
+        } catch (RuntimeException $exception) {
+            throw new RuntimeException(sprintf(
+                'Target validation failed (%s): %s',
+                $this->config->getUrl(),
+                $exception->getMessage(),
+            ), previous: $exception);
+        }
+    }
+
+    public function resetMeasurements(): void
+    {
+        $this->remoteMemoryTotal = 0.0;
+        $this->remoteMemorySamples = 0;
+    }
+
+    public function getRemoteMemoryMB(): ?float
+    {
+        if ($this->remoteMemorySamples === 0) {
+            return null;
+        }
+
+        return round(($this->remoteMemoryTotal / $this->remoteMemorySamples) / 1_048_576, 2);
+    }
+
+    public function runSingleThreaded(): array
+    {
+        $options = $this->prepareOptions();
+        $handle = curl_init();
+        $latencies = [];
+        $connectTotal = 0.0;
+        $ttfbTotal = 0.0;
+        $counters = self::emptyCounters();
+        $startedAt = hrtime(true);
+        $progressStride = max(1, intdiv($this->config->getCount(), 100));
+        $nextProgress = $progressStride;
+        $lastProgressAt = $startedAt;
+
+        try {
+            for ($i = 0, $count = $this->config->getCount(); $i < $count; ++$i) {
+                if ($i > 0) {
+                    curl_reset($handle);
+                }
+                if (!curl_setopt_array($handle, $options)) {
+                    throw new RuntimeException('Unable to configure a serial benchmark request');
+                }
+
+                $requestStartedAt = hrtime(true);
+                $response = curl_exec($handle);
+                $elapsed = self::secondsSince($requestStartedAt);
+                $info = curl_getinfo($handle);
+                $failure = $this->classify($response, $info, curl_errno($handle));
+                self::recordResult($counters, $failure);
+
+                if ($failure === null) {
+                    $latencies[] = $elapsed;
+                    $connectTotal += (float) ($info['connect_time'] ?? 0.0);
+                    $ttfbTotal += (float) ($info['starttransfer_time'] ?? 0.0);
+                    $this->captureRemoteMemory($response);
+                }
+
+                $completed = $i + 1;
+                if ($this->progress !== null && ($completed >= $nextProgress || $completed === $count)) {
+                    $now = hrtime(true);
+                    if ($completed === $count || $now - $lastProgressAt >= 100_000_000) {
+                        $this->notifyProgress($completed, $count, $startedAt, 0.0, 'serial');
+                        $lastProgressAt = $now;
+                    }
+                    $nextProgress = $completed + $progressStride;
+                }
+            }
+        } finally {
+            curl_close($handle);
+        }
+
+        return self::buildMetrics(
+            $counters,
+            $latencies,
+            self::secondsSince($startedAt),
+            $connectTotal,
+            $ttfbTotal,
+            1,
+        );
+    }
+
+    public function runConcurrent(int $threads, float $minimumDurationSeconds = 0.0): array
+    {
+        if ($threads < 2 || $threads > BenchmarkConfig::MAX_THREADS) {
+            throw new LogicException('Concurrent thread count is outside the configured safety bounds');
+        }
+        if ($minimumDurationSeconds < 0 || $minimumDurationSeconds > BenchmarkConfig::MAX_PHASE_DURATION_SECONDS) {
+            throw new LogicException('Minimum phase duration is outside the configured safety bounds');
+        }
+
+        $options = $this->prepareOptions();
+        $multi = curl_multi_init();
+        $active = [];
+        $latencies = [];
+        $connectTotal = 0.0;
+        $ttfbTotal = 0.0;
+        $counters = self::emptyCounters();
+        $launched = 0;
+        $inFlight = 0;
+        $minimumRequests = $this->config->getCount();
+        $maximumRequests = BenchmarkConfig::MAX_COUNT;
+        $progressStride = max(1, intdiv($minimumRequests, 100));
+        $nextProgress = $progressStride;
+
+        foreach ([
+            CURLMOPT_MAX_TOTAL_CONNECTIONS => $threads,
+            CURLMOPT_MAX_HOST_CONNECTIONS => $threads,
+            CURLMOPT_PIPELINING => $this->pipelineMode(),
+        ] as $option => $value) {
+            if (!curl_multi_setopt($multi, $option, $value)) {
+                throw new RuntimeException("Unable to set cURL multi option {$option}");
+            }
+        }
+
+        $enqueue = function () use ($multi, $options, &$active, &$launched, &$inFlight): void {
+            $handle = curl_init();
+            if (!curl_setopt_array($handle, $options)) {
+                curl_close($handle);
+                throw new RuntimeException('Unable to configure a concurrent benchmark request');
+            }
+            if (curl_multi_add_handle($multi, $handle) !== CURLM_OK) {
+                curl_close($handle);
+                throw new RuntimeException('Unable to add a concurrent benchmark request');
+            }
+
+            $active[spl_object_id($handle)] = $handle;
+            ++$launched;
+            ++$inFlight;
+        };
+
+        $startedAt = hrtime(true);
+        $lastProgressAt = $startedAt;
+        try {
+            for ($i = 0, $initial = min($threads, $minimumRequests); $i < $initial; ++$i) {
+                $enqueue();
+            }
+
+            do {
+                do {
+                    $multiStatus = curl_multi_exec($multi, $running);
+                } while ($multiStatus === CURLM_CALL_MULTI_PERFORM);
+
+                if ($multiStatus !== CURLM_OK) {
+                    throw new RuntimeException("cURL multi execution failed with code {$multiStatus}");
+                }
+
+                while (($completed = curl_multi_info_read($multi)) !== false) {
+                    $handle = $completed['handle'];
+                    $response = curl_multi_getcontent($handle);
+                    $info = curl_getinfo($handle);
+                    $result = (int) ($completed['result'] ?? CURLE_OK);
+                    $failure = $this->classify($response, $info, $result);
+                    self::recordResult($counters, $failure);
+
+                    if ($failure === null) {
+                        $latencies[] = (float) ($info['total_time'] ?? 0.0);
+                        $connectTotal += (float) ($info['connect_time'] ?? 0.0);
+                        $ttfbTotal += (float) ($info['starttransfer_time'] ?? 0.0);
+                        $this->captureRemoteMemory($response);
+                    }
+
+                    $completedRequests = $counters['attempted_requests'];
+                    if ($this->progress !== null && $completedRequests >= $nextProgress) {
+                        $now = hrtime(true);
+                        if ($now - $lastProgressAt >= 100_000_000) {
+                            $this->notifyProgress(
+                                $completedRequests,
+                                $minimumRequests,
+                                $startedAt,
+                                $minimumDurationSeconds,
+                                "concurrency {$threads}",
+                            );
+                            $lastProgressAt = $now;
+                        }
+                        $nextProgress = $completedRequests + $progressStride;
+                    }
+
+                    curl_multi_remove_handle($multi, $handle);
+                    curl_close($handle);
+                    unset($active[spl_object_id($handle)]);
+                    --$inFlight;
+
+                    $needsMoreRequests = $launched < $minimumRequests
+                        || self::secondsSince($startedAt) < $minimumDurationSeconds;
+                    if ($needsMoreRequests && $launched < $maximumRequests) {
+                        $enqueue();
+                    }
+                }
+
+                if ($inFlight > 0) {
+                    $selected = curl_multi_select($multi, 1.0);
+                    if ($selected === -1) {
+                        usleep(1_000);
+                    }
+                }
+            } while ($inFlight > 0);
+        } finally {
+            foreach ($active as $handle) {
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            curl_multi_close($multi);
+        }
+
+        $this->notifyProgress(
+            $counters['attempted_requests'],
+            $minimumRequests,
+            $startedAt,
+            $minimumDurationSeconds,
+            "concurrency {$threads}",
+        );
+
+        return self::buildMetrics(
+            $counters,
+            $latencies,
+            self::secondsSince($startedAt),
+            $connectTotal,
+            $ttfbTotal,
+            $threads,
+            $minimumDurationSeconds,
+        );
+    }
+
     private function baseCurlOptions(): array
     {
-        $ssl = $this->config->isVerifySsl() ?? true;
-
-        $sslOpts = $ssl
+        $verifySsl = $this->config->isVerifySsl() ?? true;
+        $sslOptions = $verifySsl
             ? [CURLOPT_SSL_VERIFYHOST => 2, CURLOPT_SSL_VERIFYPEER => true]
             : [CURLOPT_SSL_VERIFYHOST => 0, CURLOPT_SSL_VERIFYPEER => false];
 
-        return $sslOpts + [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_ENCODING => '',
-                CURLOPT_FOLLOWLOCATION => false,
-                CURLOPT_CONNECTTIMEOUT => $this->config->getTimeout(),
-                CURLOPT_TIMEOUT => $this->config->getTimeout(),
-            ] + $this->config->getCurlOptions();
+        return $sslOptions + [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_ENCODING => '',
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => $this->config->getTimeout(),
+            CURLOPT_TIMEOUT => $this->config->getTimeout(),
+        ] + $this->config->getCurlOptions();
     }
 
-    private function captureRemoteMem(mixed $response): void
-    {
-        if (!is_string($response) || $response === '' || $response[0] !== '{') {
-            return;
-        }
-        try {
-            $json = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
-            if (is_array($json) && isset($json['memory']) && is_numeric($json['memory'])) {
-                $this->remoteMem[] = (int)$json['memory'];
-            }
-        } catch (\JsonException) {
-            /* ignore malformed JSON */
-        }
-    }
-
-    /** Merge URL, verb, headers, body and base options into one array. */
     private function prepareOptions(): array
     {
-        $opts = [
+        $options = [
             CURLOPT_URL => $this->config->getUrl(),
             CURLOPT_CUSTOMREQUEST => $this->config->getMethod()->value,
         ];
-
         $body = $this->config->getBody();
         $headers = $this->config->getHeaders();
 
         if (is_array($body)) {
-            $opts[CURLOPT_POSTFIELDS] = json_encode($body);
+            $options[CURLOPT_POSTFIELDS] = json_encode($body, JSON_THROW_ON_ERROR);
             $headers['Content-Type'] ??= 'application/json';
         } elseif (is_string($body)) {
-            $opts[CURLOPT_POSTFIELDS] = $body;
+            $options[CURLOPT_POSTFIELDS] = $body;
         }
 
-        if ($headers) {
-            $opts[CURLOPT_HTTPHEADER] = array_map(
-                static fn($k, $v) => "{$k}: {$v}",
-                array_keys($headers),
-                $headers,
-            );
-        }
-
-        $opts[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
-        if (($this->config->isHttp2Enabled() ?? false)) {
-            $opts[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_2_0;
-        }
-
-        return $opts + $this->baseCurlOptions();
-    }
-
-    /** Lightweight HEAD probe to verify connectivity & status code. */
-    private function checkConnection(array $opts): void
-    {
-        $ch = curl_init();
-
-        $head = $opts;
-        $head[CURLOPT_NOBODY] = true;
-        $head[CURLOPT_HTTP_VERSION] = CURL_HTTP_VERSION_1_1;
-
-        curl_setopt_array($ch, $head);
-        $resp = curl_exec($ch);
-        $info = curl_getinfo($ch);
-        $err = curl_error($ch);
-        curl_close($ch);
-
-        if ($resp === false) {
-            throw new Exception("Connectivity failed ({$this->config->getUrl()}): $err");
-        }
-        if ($info['http_code'] !== $this->config->getExpectedStatus()) {
-            throw new Exception(
-                "Connectivity: expected {$this->config->getExpectedStatus()}, got {$info['http_code']}",
-            );
-        }
-    }
-
-    /* ------------------ single-thread (serial) ------------------- */
-
-    private function singleThreaded(array $opts): array
-    {
-        $ch = curl_init();
-        curl_setopt_array($ch, $opts);
-
-        $times = [];
-        $connects = [];
-        $ttfbs = [];
-
-        try {
-            for ($i = 0; $i < $this->config->getCount(); $i++) {
-                if ($i > 0) {
-                    curl_reset($ch);
-                    curl_setopt_array($ch, $opts);
+        if ($headers !== []) {
+            $options[CURLOPT_HTTPHEADER] = [];
+            foreach ($headers as $name => $value) {
+                if (!is_string($name) || (!is_string($value) && !is_numeric($value))) {
+                    throw new LogicException('HTTP headers must be a string-keyed map of scalar values');
                 }
-
-                $t0 = microtime(true);
-                $resp = curl_exec($ch);
-                if ($resp === false) {
-                    throw new Exception(
-                        "cURL error [".curl_errno($ch).']: '.curl_error($ch)
-                    );
-                }
-                $times[] = microtime(true) - $t0;
-                $info = curl_getinfo($ch);
-
-                if ($info['http_code'] !== $this->config->getExpectedStatus()) {
-                    throw new Exception("Single-thread: unexpected HTTP {$info['http_code']}");
-                }
-
-                $connects[] = $info['connect_time'];
-                $ttfbs[] = $info['starttransfer_time'];
-                $this->captureRemoteMem($resp);
+                $options[CURLOPT_HTTPHEADER][] = "{$name}: {$value}";
             }
-        } finally {
-            curl_close($ch);
         }
 
-        sort($times);
-        $n = count($times);
-        $total = array_sum($times);
-        $median = $times[(int)floor($n / 2)];
-        $p95 = $times[max(0, (int)ceil($n * 0.95) - 1)];
+        $options[CURLOPT_HTTP_VERSION] = ($this->config->isHttp2Enabled() ?? false)
+            ? CURL_HTTP_VERSION_2_0
+            : CURL_HTTP_VERSION_1_1;
+        if ($this->config->getMethod() === HttpMethod::HEAD) {
+            $options[CURLOPT_NOBODY] = true;
+        }
 
-        return [
-            'req_per_sec' => round($n / $total, 5),
-            'avg' => round($total / $n, 5),
-            'min' => round($times[0], 5),
-            'max' => round($times[$n - 1], 5),
-            'median' => round($median, 5),
-            'p95' => round($p95, 5),
-            'avg_connect_time' => round(array_sum($connects) / $n, 5),
-            'avg_ttfb' => round(array_sum($ttfbs) / $n, 5),
-        ];
+        return $options + $this->baseCurlOptions();
     }
 
-    /* ------------------ multi-thread (concurrent) ---------------- */
-
-    private function multiThreaded(array $opts): array
+    private function pipelineMode(): int
     {
-        /** @var CurlMultiHandle $cmh */
-        $cmh = curl_multi_init();
-        $threads = $this->config->getThreads();
-        $total = $this->config->getCount();
-
-        curl_multi_setopt($cmh, CURLMOPT_MAX_TOTAL_CONNECTIONS, $threads);
-        curl_multi_setopt($cmh, CURLMOPT_MAX_HOST_CONNECTIONS, $threads);
-
-        $pipeline = match ($this->config->getPiping()) {
+        return match ($this->config->getPiping()) {
             PipingMode::Optimal => ($this->config->isHttp2Enabled() ?? false) ? CURLPIPE_MULTIPLEX : 0,
             PipingMode::Max => CURLPIPE_MULTIPLEX,
         };
-        curl_multi_setopt($cmh, CURLMOPT_PIPELINING, $pipeline);
-
-        $maxPipe = $this->config->getPiping() === PipingMode::Optimal
-            ? (int)ceil($total / $threads) : $total;
-        curl_multi_setopt($cmh, CURLMOPT_MAX_PIPELINE_LENGTH, $maxPipe);
-
-        /* ---------- queue helpers ---------- */
-        $launched = 0;
-        $inFlight = 0;
-        $codes = [];
-        $startTime = microtime(true);
-
-        $enqueue = function () use (&$launched, &$inFlight, $total, $opts, $cmh): void {
-            $h = curl_init();
-            curl_setopt_array($h, $opts);
-            curl_multi_add_handle($cmh, $h);
-            $launched++;
-            $inFlight++;
-        };
-
-        /* prime queue */
-        for ($i = 0, $initial = min($threads, $total); $i < $initial; $i++) {
-            $enqueue();
-        }
-
-        /* drive the state machine */
-        do {
-            curl_multi_exec($cmh, $running);
-            curl_multi_select($cmh, 1.0);
-
-            while ($info = curl_multi_info_read($cmh)) {
-                $codes[] = curl_getinfo($info['handle'], CURLINFO_HTTP_CODE);
-                $this->captureRemoteMem(curl_multi_getcontent($info['handle']));
-
-                curl_multi_remove_handle($cmh, $info['handle']);
-                curl_close($info['handle']);
-                $inFlight--;
-
-                if ($launched < $total) {
-                    $enqueue();
-                }
-            }
-        } while ($running || $inFlight > 0);
-
-        $duration = microtime(true) - $startTime;
-        curl_multi_close($cmh);
-
-        /* verify HTTP codes */
-        $bad = array_diff($codes, [$this->config->getExpectedStatus()]);
-        if ($bad) {
-            throw new Exception('Multi-thread: unexpected status codes: ' . implode(', ', array_unique($bad)));
-        }
-
-        return ['req_per_sec' => round($total / $duration, 5)];
     }
 
-    private static function bytesToMB(int|float $b): float
+    /** @param array<string, mixed> $info */
+    private function classify(string|false $response, array $info, int $transferResult): ?string
     {
-        return round($b / 1_048_576, 2);
+        if ($transferResult === CURLE_OPERATION_TIMEDOUT) {
+            return 'timeout';
+        }
+        if ($response === false || $transferResult !== CURLE_OK) {
+            return 'transfer';
+        }
+        if ((int) ($info['http_code'] ?? 0) !== $this->config->getExpectedStatus()) {
+            return 'status';
+        }
+
+        try {
+            if (!(($this->config->getResponseValidator())($response, $info))) {
+                return 'validation';
+            }
+        } catch (Throwable) {
+            return 'validation';
+        }
+
+        return null;
+    }
+
+    private function captureRemoteMemory(string|false $response): void
+    {
+        if (!is_string($response)) {
+            return;
+        }
+        $response = ltrim($response);
+        if ($response === '' || $response[0] !== '{') {
+            return;
+        }
+
+        try {
+            $json = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+            if (is_array($json) && isset($json['memory']) && is_numeric($json['memory'])) {
+                $this->remoteMemoryTotal += (float) $json['memory'];
+                ++$this->remoteMemorySamples;
+            }
+        } catch (JsonException) {
+            // Response validation owns malformed-body reporting.
+        }
+    }
+
+    /** @return array<string, int> */
+    private static function emptyCounters(): array
+    {
+        return [
+            'attempted_requests' => 0,
+            'successful_requests' => 0,
+            'failed_requests' => 0,
+            'transfer_errors' => 0,
+            'timeout_failures' => 0,
+            'status_failures' => 0,
+            'validation_failures' => 0,
+        ];
+    }
+
+    /** @param array<string, int> $counters */
+    private static function recordResult(array &$counters, ?string $failure): void
+    {
+        ++$counters['attempted_requests'];
+        if ($failure === null) {
+            ++$counters['successful_requests'];
+            return;
+        }
+
+        ++$counters['failed_requests'];
+        ++$counters[match ($failure) {
+            'timeout' => 'timeout_failures',
+            'transfer' => 'transfer_errors',
+            'status' => 'status_failures',
+            'validation' => 'validation_failures',
+        }];
+    }
+
+    /**
+     * @param array<string, int> $counters
+     * @param list<float> $latencies
+     */
+    private static function buildMetrics(
+        array $counters,
+        array $latencies,
+        float $duration,
+        float $connectTotal,
+        float $ttfbTotal,
+        int $concurrency,
+        float $minimumDurationSeconds = 0.0,
+    ): array {
+        sort($latencies, SORT_NUMERIC);
+        $successes = $counters['successful_requests'];
+        $attempted = $counters['attempted_requests'];
+        $latencyTotal = array_sum($latencies);
+        $requestsPerSecond = $duration > 0 ? $successes / $duration : 0.0;
+
+        return $counters + [
+            'concurrency' => $concurrency,
+            'duration' => round($duration, 5),
+            'req_per_sec' => round($requestsPerSecond, 5),
+            'req_per_min' => round($requestsPerSecond * 60, 5),
+            'attempted_req_per_sec' => round($duration > 0 ? $attempted / $duration : 0.0, 5),
+            'error_rate' => round($attempted > 0 ? $counters['failed_requests'] / $attempted : 0.0, 5),
+            'steady_state_reached' => $duration >= $minimumDurationSeconds,
+            'avg' => $successes > 0 ? round($latencyTotal / $successes, 5) : null,
+            'min' => $successes > 0 ? round($latencies[0], 5) : null,
+            'max' => $successes > 0 ? round($latencies[$successes - 1], 5) : null,
+            'median' => self::percentile($latencies, 0.50),
+            'p50' => self::percentile($latencies, 0.50),
+            'p95' => self::percentile($latencies, 0.95),
+            'p99' => self::percentile($latencies, 0.99),
+            'avg_connect_time' => $successes > 0 ? round($connectTotal / $successes, 5) : null,
+            'avg_ttfb' => $successes > 0 ? round($ttfbTotal / $successes, 5) : null,
+        ];
+    }
+
+    /** @param list<float> $sorted */
+    private static function percentile(array $sorted, float $percentile): ?float
+    {
+        $count = count($sorted);
+        if ($count === 0) {
+            return null;
+        }
+
+        $position = ($count - 1) * $percentile;
+        $lower = (int) floor($position);
+        $upper = (int) ceil($position);
+        $value = $sorted[$lower];
+        if ($upper !== $lower) {
+            $value += ($sorted[$upper] - $value) * ($position - $lower);
+        }
+
+        return round($value, 5);
+    }
+
+    private static function secondsSince(int $startedAt): float
+    {
+        return (hrtime(true) - $startedAt) / 1_000_000_000;
+    }
+
+    private function notifyProgress(
+        int $completed,
+        int $minimumRequests,
+        int $startedAt,
+        float $minimumDurationSeconds,
+        string $phase,
+    ): void {
+        if ($this->progress === null) {
+            return;
+        }
+
+        ($this->progress)(
+            $completed,
+            $minimumRequests,
+            self::secondsSince($startedAt),
+            $minimumDurationSeconds,
+            $phase,
+        );
     }
 }

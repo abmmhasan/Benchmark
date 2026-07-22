@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
 
+use LogicException;
+use Throwable;
+
 /**
  * Tiny helper for *unit-scope* profiling.
  *
@@ -16,11 +19,14 @@ namespace AbmmHasan\Benchmark;
  */
 final class UnitBenchmark
 {
+    private const MAX_SAMPLES = 100_000;
+
     /** @var int[] byte-counts captured at each snapshot */
     private static array $samples = [];
 
     private static int $t0 = 0;  // hrtime nanoseconds
     private static int $peak0 = 0;  // bytes
+    private static bool $active = false;
 
     /* --------------------------------------------------------------------- */
     /* Life-cycle helpers                                                    */
@@ -29,9 +35,15 @@ final class UnitBenchmark
     /** Reset internal state and mark the start of the benchmark. */
     public static function start(): void
     {
+        if (self::$active) {
+            throw new LogicException('A unit benchmark is already active; nested measurements are unsupported');
+        }
+
+        self::$active = true;
         self::$samples = [];
+        memory_reset_peak_usage();
         self::$t0 = hrtime(true);
-        self::$peak0 = memory_get_peak_usage(true);
+        self::$peak0 = memory_get_usage(false);
     }
 
     /**
@@ -41,7 +53,14 @@ final class UnitBenchmark
      */
     public static function snapshot(): int
     {
-        return self::$samples[] = memory_get_usage(true);
+        if (!self::$active) {
+            throw new LogicException('Call UnitBenchmark::start() before taking a snapshot');
+        }
+        if (count(self::$samples) >= self::MAX_SAMPLES) {
+            throw new LogicException('Unit benchmark sample limit exceeded');
+        }
+
+        return self::$samples[] = memory_get_usage(false);
     }
 
     /**
@@ -58,10 +77,17 @@ final class UnitBenchmark
      */
     public static function end(): array
     {
-        self::snapshot();                                // ensure at least one sample
+        if (!self::$active) {
+            throw new LogicException('Call UnitBenchmark::start() before ending a benchmark');
+        }
+
+        if (count(self::$samples) < self::MAX_SAMPLES) {
+            self::snapshot();                            // ensure a final sample when capacity permits
+        }
 
         $durationNs = hrtime(true) - self::$t0;
-        $peak = memory_get_peak_usage(true);
+        $peak = memory_get_peak_usage(false);
+        self::$active = false;
 
         return [
             'duration_ms' => $durationNs / 1_000_000,    // nanoseconds → ms
@@ -88,8 +114,14 @@ final class UnitBenchmark
     public static function run(callable $fn): array
     {
         self::start();
-        $result = $fn();
-        $stats = self::end();
+        try {
+            $result = $fn();
+            $stats = self::end();
+        } catch (Throwable $exception) {
+            self::$active = false;
+            self::$samples = [];
+            throw $exception;
+        }
 
         return ['stats' => $stats, 'return' => $result];
     }

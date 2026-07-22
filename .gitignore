@@ -1,4 +1,5 @@
 /vendor/
+/.phpbench/
 .idea
 example.php
 composer.lock
