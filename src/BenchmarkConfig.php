@@ -43,6 +43,7 @@ final class BenchmarkConfig
     private array $curlOptions;
     private bool $skipPreflight;
     private Closure $responseValidator;
+    private ?Closure $responseMemoryExtractor;
 
     public function __construct(
         string $url,
@@ -65,6 +66,7 @@ final class BenchmarkConfig
         ?string $name = null,
         bool $skipPreflight = false,
         ?callable $responseValidator = null,
+        ?callable $responseMemoryExtractor = null,
     ) {
         /* ---------- basic validation ---------- */
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
@@ -115,6 +117,9 @@ final class BenchmarkConfig
         $this->skipPreflight = $skipPreflight;
         $this->name = $name ?? $url;
         $this->responseValidator = Closure::fromCallable($responseValidator);
+        $this->responseMemoryExtractor = $responseMemoryExtractor === null
+            ? null
+            : Closure::fromCallable($responseMemoryExtractor);
     }
 
     /* ---------- getters ---------- */
@@ -204,5 +209,11 @@ final class BenchmarkConfig
     public function getResponseValidator(): Closure
     {
         return $this->responseValidator;
+    }
+
+    /** @return null|Closure(string, array<string, mixed>):int|float|null */
+    public function getResponseMemoryExtractor(): ?Closure
+    {
+        return $this->responseMemoryExtractor;
     }
 }

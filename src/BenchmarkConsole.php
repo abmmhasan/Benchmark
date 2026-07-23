@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace AbmmHasan\Benchmark;
 
 use Symfony\Component\Console\Formatter\OutputFormatter;
-use Symfony\Component\Console\Helper\ProgressBar;
+use Symfony\Component\Console\Output\ConsoleSectionOutput;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\StreamOutput;
 
@@ -15,11 +15,12 @@ use function Termwind\renderUsing;
 /** Renders benchmark progress exclusively to STDERR. */
 final class BenchmarkConsole
 {
-    private const PROGRESS_MAX = 1_000;
-
     private readonly StreamOutput $output;
     private readonly bool $interactive;
-    private ?ProgressBar $bar = null;
+    /** @var list<ConsoleSectionOutput> */
+    private array $sectionStack = [];
+    /** @var array<string, ConsoleSectionOutput> */
+    private array $sections = [];
     private ?string $target = null;
 
     public function __construct()
@@ -89,41 +90,51 @@ final class BenchmarkConsole
             return;
         }
 
-        $label = str_pad(self::truncate(self::consoleText($target), 18), 18);
-        $this->bar = new ProgressBar($this->output, self::PROGRESS_MAX, 0.1);
-        $this->bar->setBarWidth(28);
-        $this->bar->setBarCharacter('<fg=cyan>━</>');
-        $this->bar->setEmptyBarCharacter('<fg=gray>─</>');
-        $this->bar->setProgressCharacter('<fg=cyan>╸</>');
-        $this->bar->setFormat(" <fg=white>{$label}</> [%bar%] %percent:3s%% <fg=gray>%message%</>");
-        $this->bar->setMessage('preparing');
-        $this->bar->start();
+        if (isset($this->sections[$target])) {
+            return;
+        }
+
+        $section = new ConsoleSectionOutput(
+            STDERR,
+            $this->sectionStack,
+            $this->output->getVerbosity(),
+            true,
+            $this->output->getFormatter(),
+        );
+        $this->sections[$target] = $section;
+        $section->writeln(self::progressLine($target, 0.0, 'preparing'));
     }
 
     public function updateTarget(float $fraction, string $message): void
     {
-        if (!$this->interactive || $this->bar === null) {
+        if (!$this->interactive || $this->target === null || !isset($this->sections[$this->target])) {
             return;
         }
 
-        $this->bar->setMessage(self::truncate(self::safeText($message), 54));
-        $this->bar->setProgress((int) round(max(0.0, min(1.0, $fraction)) * self::PROGRESS_MAX));
+        $this->sections[$this->target]->overwrite(self::progressLine($this->target, $fraction, $message));
     }
 
-    public function finishTarget(float $rpm, int $concurrency, float $duration, float $errorRate): void
+    public function finishTarget(
+        float $rpm,
+        int $concurrency,
+        float $duration,
+        float $errorRate,
+        string $stability,
+    ): void
     {
         $summary = sprintf(
-            'done · %.0f RPM · c=%d · %.1fs · errors %.2f%%',
+            'done · %.0f RPM · c=%d · %.1fs · errors %.2f%% · %s',
             $rpm,
             $concurrency,
             $duration,
             $errorRate * 100,
+            $stability,
         );
 
-        if ($this->interactive && $this->bar !== null) {
-            $this->bar->setMessage("<fg=green>{$summary}</>");
-            $this->bar->finish();
-            $this->output->writeln('');
+        if ($this->interactive && $this->target !== null && isset($this->sections[$this->target])) {
+            $this->sections[$this->target]->overwrite(
+                self::progressLine($this->target, 1.0, "<fg=green>{$summary}</>"),
+            );
         } else {
             $this->output->writeln(sprintf(
                 ' ✓ %-18s %s',
@@ -132,17 +143,21 @@ final class BenchmarkConsole
             ));
         }
 
-        $this->bar = null;
+        unset($this->sections[(string) $this->target]);
         $this->target = null;
     }
 
     public function failTarget(string $message): void
     {
         $message = 'failed · ' . self::truncate(self::safeText($message), 70);
-        if ($this->interactive && $this->bar !== null) {
-            $this->bar->setMessage('<fg=red>' . self::consoleText($message) . '</>');
-            $this->bar->display();
-            $this->output->writeln('');
+        if ($this->interactive && $this->target !== null && isset($this->sections[$this->target])) {
+            $this->sections[$this->target]->overwrite(
+                self::progressLine(
+                    $this->target,
+                    0.0,
+                    '<fg=red>' . self::consoleText($message) . '</>',
+                ),
+            );
         } else {
             $this->output->writeln(sprintf(
                 ' ✗ %-18s %s',
@@ -151,7 +166,7 @@ final class BenchmarkConsole
             ));
         }
 
-        $this->bar = null;
+        unset($this->sections[(string) $this->target]);
         $this->target = null;
     }
 
@@ -168,6 +183,26 @@ final class BenchmarkConsole
     private static function safeText(string $text): string
     {
         return preg_replace('/[\x00-\x1F\x7F]/u', ' ', $text) ?? '';
+    }
+
+    private static function progressLine(string $target, float $fraction, string $message): string
+    {
+        $fraction = max(0.0, min(1.0, $fraction));
+        $complete = (int) floor($fraction * 28);
+        $bar = str_repeat('━', $complete);
+        $empty = str_repeat('─', 28 - $complete);
+        $label = str_pad(self::truncate(self::consoleText($target), 18), 18);
+
+        return sprintf(
+            ' <fg=white>%s</> [<fg=cyan>%s</><fg=gray>%s</>] %3d%% <fg=gray>%s</>',
+            $label,
+            $bar,
+            $empty,
+            (int) round($fraction * 100),
+            str_starts_with($message, '<fg=')
+                ? $message
+                : self::consoleText(self::truncate($message, 54)),
+        );
     }
 
     private static function consoleText(string $text): string

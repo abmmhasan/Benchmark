@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AbmmHasan\Benchmark;
 
 use Closure;
-use JsonException;
 use LogicException;
 use RuntimeException;
 use Throwable;
@@ -206,7 +205,7 @@ final class RequestBenchmark
                     $latencies[] = $elapsed;
                     $connectTotal += (float) ($info['connect_time'] ?? 0.0);
                     $ttfbTotal += (float) ($info['starttransfer_time'] ?? 0.0);
-                    $this->captureRemoteMemory($response);
+                    $this->captureRemoteMemory($response, $info);
                 }
 
                 $completed = $i + 1;
@@ -310,7 +309,7 @@ final class RequestBenchmark
                         $latencies[] = (float) ($info['total_time'] ?? 0.0);
                         $connectTotal += (float) ($info['connect_time'] ?? 0.0);
                         $ttfbTotal += (float) ($info['starttransfer_time'] ?? 0.0);
-                        $this->captureRemoteMemory($response);
+                        $this->captureRemoteMemory($response, $info);
                     }
 
                     $completedRequests = $counters['attempted_requests'];
@@ -459,24 +458,25 @@ final class RequestBenchmark
         return null;
     }
 
-    private function captureRemoteMemory(string|false $response): void
+    /** @param array<string, mixed> $info */
+    private function captureRemoteMemory(string|false $response, array $info): void
     {
-        if (!is_string($response)) {
-            return;
-        }
-        $response = ltrim($response);
-        if ($response === '' || $response[0] !== '{') {
+        $extractor = $this->config->getResponseMemoryExtractor();
+        if (!is_string($response) || $extractor === null) {
             return;
         }
 
         try {
-            $json = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
-            if (is_array($json) && isset($json['memory']) && is_numeric($json['memory'])) {
-                $this->remoteMemoryTotal += (float) $json['memory'];
+            $memory = $extractor($response, $info);
+            if (is_int($memory) || is_float($memory)) {
+                if (!is_finite((float) $memory) || $memory < 0) {
+                    return;
+                }
+                $this->remoteMemoryTotal += (float) $memory;
                 ++$this->remoteMemorySamples;
             }
-        } catch (JsonException) {
-            // Response validation owns malformed-body reporting.
+        } catch (Throwable) {
+            // Optional telemetry must not change response correctness.
         }
     }
 
@@ -538,7 +538,7 @@ final class RequestBenchmark
             'req_per_min' => round($requestsPerSecond * 60, 5),
             'attempted_req_per_sec' => round($duration > 0 ? $attempted / $duration : 0.0, 5),
             'error_rate' => round($attempted > 0 ? $counters['failed_requests'] / $attempted : 0.0, 5),
-            'steady_state_reached' => $duration >= $minimumDurationSeconds,
+            'minimum_window_reached' => $duration >= $minimumDurationSeconds,
             'avg' => $successes > 0 ? round($latencyTotal / $successes, 5) : null,
             'min' => $successes > 0 ? round($latencies[0], 5) : null,
             'max' => $successes > 0 ? round($latencies[$successes - 1], 5) : null,

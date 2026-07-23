@@ -131,6 +131,7 @@ namespace {
         name: $overrides['name'] ?? 'test',
         skipPreflight: $overrides['skipPreflight'] ?? true,
         responseValidator: $overrides['validator'] ?? $validator,
+        responseMemoryExtractor: $overrides['memoryExtractor'] ?? null,
     );
 
     $assert(enum_exists(HttpMethod::class), 'HttpMethod autoloads directly');
@@ -155,6 +156,11 @@ namespace {
     $applyDefaults = new ReflectionMethod($runner, 'applyDefaults');
     $defaulted = $applyDefaults->invoke($runner, $rawConfig);
     $assert($defaulted->getSampleInterval() === 7.0, 'runner sampling default is applied');
+    $expectException(
+        InvalidArgumentException::class,
+        static fn() => BenchmarkRunner::make()->repetitions(4),
+        'repetitions are capped at three',
+    );
 
     $duplicateRunner = BenchmarkRunner::make();
     $duplicateRunner->addConfigs($resolvedConfig(['name' => 'duplicate']));
@@ -232,11 +238,21 @@ namespace {
     );
     $progressBenchmark->runSingleThreaded();
     $steady = $progressBenchmark->runConcurrent(2, 0.001);
-    $assert($steady['steady_state_reached'] === true, 'concurrent phases honor minimum duration');
+    $assert($steady['minimum_window_reached'] === true, 'concurrent phases honor minimum duration');
     $assert($steady['attempted_requests'] >= 100, 'minimum request count is preserved');
     $lastProgress = $progressUpdates[array_key_last($progressUpdates)];
     $assert($lastProgress['completed'] >= 100, 'progress reports completed iterations');
     $assert($lastProgress['phase'] === 'concurrency 2', 'progress identifies the active phase');
+
+    FakeCurl::reset();
+    $withoutMemoryExtractor = new RequestBenchmark($resolvedConfig());
+    $withoutMemoryExtractor->runSingleThreaded();
+    $assert($withoutMemoryExtractor->getRemoteMemoryMB() === null, 'response memory extraction is opt-in');
+    $withMemoryExtractor = new RequestBenchmark($resolvedConfig([
+        'memoryExtractor' => static fn(string $body): int => 1_048_576,
+    ]));
+    $withMemoryExtractor->runSingleThreaded();
+    $assert($withMemoryExtractor->getRemoteMemoryMB() === 1.0, 'optional response memory is measured in bytes');
 
     FakeCurl::reset();
     $failFastRunner = BenchmarkRunner::make()
@@ -261,7 +277,11 @@ namespace {
     $perConfigRunner = BenchmarkRunner::make()
         ->warmUpRequests(0)
         ->minimumDuration(0)
-        ->addConfigs($resolvedConfig(['threads' => 4, 'name' => 'per-config']));
+        ->stabilityThreshold(10_000)
+        ->addConfigs(
+            $resolvedConfig(['threads' => 4, 'name' => 'per-config']),
+            $resolvedConfig(['threads' => 4, 'name' => 'rotation-target']),
+        );
     $results = $perConfigRunner->runAll();
     $result = $results['per-config'];
     $assert(count($result['runs']) === 3, 'three repeated runs are recorded');
@@ -269,6 +289,17 @@ namespace {
     $assert($result['score'] === $result['multiple']['req_per_min'], 'ranking score is validated RPM');
     $assert(isset($result['multiple']['req_per_min_mad']), 'repeated-run RPM variance is recorded');
     $assert($result['configuration']['responseValidation'] === true, 'reproduction metadata is recorded');
+    $assert(
+        $result['runs'][0]['targetOrder'] === ['per-config', 'rotation-target']
+        && $result['runs'][1]['targetOrder'] === ['rotation-target', 'per-config'],
+        'target order rotates between repetitions',
+    );
+    $assert(
+        $result['runs'][0]['concurrencyOrder'] === [2, 4]
+        && $result['runs'][1]['concurrencyOrder'] === [4, 2],
+        'concurrency order rotates between repetitions',
+    );
+    $assert($result['rankingStatus'] === 'stable', 'stable results remain rankable');
 
     $toMarkdownTable = new ReflectionMethod($perConfigRunner, 'toMarkdownTable');
     $markdown = $toMarkdownTable->invoke($perConfigRunner, $results);
@@ -291,13 +322,20 @@ namespace {
         'each reliability concurrency has its own comparison table',
     );
     $assert(str_contains($markdown, '## Common configuration'), 'common configuration has its own table');
-    $assert(str_contains($markdown, '## Runtime environment'), 'runtime details have their own table');
+    $assert(
+        str_contains($markdown, '## Load-generator environment'),
+        'load-generator runtime details have their own table',
+    );
     $assert(
         str_contains($markdown, '## Target-specific configuration'),
         'target-specific configuration has its own table',
     );
     $assert(!str_contains($markdown, 'configuration.'), 'Markdown avoids flattened configuration keys');
     $assert(!str_contains($markdown, '| RPS |'), 'derived RPS is not duplicated beside RPM');
+    $assert(
+        str_contains($markdown, 'Run 1 RPM') && str_contains($markdown, 'Run 3 RPM'),
+        'per-run RPM remains visible',
+    );
     preg_match('/## Ranking\R\R(?<table>.*?)(?=\R\R## )/s', $markdown, $summaryMatch);
     $assert(
         !str_contains($summaryMatch['table'] ?? '', 'RPS')
@@ -320,6 +358,60 @@ namespace {
         'target-specific configuration is pivoted for comparison',
     );
     $assert(!str_contains($comparisonMarkdown, '| Recorded at |'), 'timestamps are not presented as configuration');
+
+    $medianMetrics = new ReflectionMethod(BenchmarkRunner::class, 'medianMetrics');
+    $unstableMeasurements = [];
+    foreach ([100.0, 101.0, 140.0] as $rpm) {
+        $measurement = $steady;
+        $measurement['req_per_min'] = $rpm;
+        $unstableMeasurements[] = $measurement;
+    }
+    $unstable = $medianMetrics->invoke(null, $unstableMeasurements, 5.0);
+    $assert($unstable['rpm_stability'] === 'unstable', 'spread beyond the threshold is marked unstable');
+    $unverified = $medianMetrics->invoke(null, [$unstableMeasurements[0]], 5.0);
+    $assert($unverified['rpm_stability'] === 'unverified', 'one repetition is explicitly unverified');
+
+    $stabilityRuns = $result['runs'];
+    foreach ([100.0, 101.0, 102.0] as $index => $rpm) {
+        $stabilityRuns[$index]['concurrency'][2]['req_per_min'] = $rpm;
+    }
+    foreach ([200.0, 400.0, 800.0] as $index => $rpm) {
+        $stabilityRuns[$index]['concurrency'][4]['req_per_min'] = $rpm;
+    }
+    $stabilityRunner = BenchmarkRunner::make()
+        ->warmUpRequests(0)
+        ->minimumDuration(0)
+        ->stabilityThreshold(5);
+    $aggregateConfig = new ReflectionMethod($stabilityRunner, 'aggregateConfig');
+    $stableSelection = $aggregateConfig->invoke(
+        $stabilityRunner,
+        'stability-test',
+        $resolvedConfig(['threads' => 4, 'name' => 'stability-test']),
+        [2, 4],
+        $stabilityRuns,
+        [],
+        1.0,
+    );
+    $assert(
+        $stableSelection['multiple']['concurrency'] === 2,
+        'an unstable faster concurrency is excluded from selection',
+    );
+    foreach ([100.0, 200.0, 400.0] as $index => $rpm) {
+        $stabilityRuns[$index]['concurrency'][2]['req_per_min'] = $rpm;
+    }
+    $inconclusive = $aggregateConfig->invoke(
+        $stabilityRunner,
+        'stability-test',
+        $resolvedConfig(['threads' => 4, 'name' => 'stability-test']),
+        [2, 4],
+        $stabilityRuns,
+        [],
+        1.0,
+    );
+    $assert(
+        $inconclusive['score'] === null && $inconclusive['rankingStatus'] === 'inconclusive',
+        'a target with no stable concurrency is excluded from ranking',
+    );
 
     $unit = UnitBenchmark::run(static function (): int {
         $allocation = str_repeat('x', 1024 * 1024);
@@ -347,6 +439,11 @@ namespace {
 
     $toBytes = new ReflectionMethod(ContainerStats::class, 'toBytes');
     $assert($toBytes->invoke(null, '1.5GiB') === 1_610_612_736.0, 'Docker memory units are parsed');
+    $containerStats = new ContainerStats('test-container');
+    $consumeLine = new ReflectionMethod(ContainerStats::class, 'consumeLine');
+    $consumeLine->invoke($containerStats, "\033[2J\033[H28.35MiB / 15.33GiB,0.36%");
+    $memorySamples = new ReflectionProperty(ContainerStats::class, 'memory');
+    $assert(count($memorySamples->getValue($containerStats)) === 1, 'Docker ANSI prefixes are stripped');
 
     fwrite(STDOUT, "OK ({$tests} assertions)\n");
 }

@@ -25,8 +25,8 @@ final class ContainerStats
     private mixed $stdout = null;
 
     private string $buffer = '';
-    private int $linesSeen = 0;
-    private readonly int $sampleStep;
+    private ?int $lastSampleAt = null;
+    private readonly int $sampleIntervalNanoseconds;
 
     public function __construct(
         private readonly string $container,
@@ -39,8 +39,7 @@ final class ContainerStats
             throw new LogicException('Container sample interval must be at least one second');
         }
 
-        // Docker emits approximately once per second; retain the requested cadence.
-        $this->sampleStep = max(1, (int) round($interval));
+        $this->sampleIntervalNanoseconds = (int) round($interval * 1_000_000_000);
     }
 
     public function start(): void
@@ -146,6 +145,8 @@ final class ContainerStats
 
     private function consumeLine(string $line): void
     {
+        $line = preg_replace('/\x1B\[[0-?]*[ -\/]*[@-~]/', '', $line) ?? '';
+        $line = trim($line);
         if ($line === '') {
             return;
         }
@@ -153,8 +154,11 @@ final class ContainerStats
             return;
         }
 
-        ++$this->linesSeen;
-        if (($this->linesSeen - 1) % $this->sampleStep !== 0) {
+        $now = hrtime(true);
+        if (
+            $this->lastSampleAt !== null
+            && $now - $this->lastSampleAt < $this->sampleIntervalNanoseconds
+        ) {
             return;
         }
 
@@ -172,6 +176,7 @@ final class ContainerStats
 
         $this->memory[] = $memory;
         $this->cpu[] = (float) rtrim($cpuField, '%');
+        $this->lastSampleAt = $now;
     }
 
     private static function toBytes(string $value): ?float

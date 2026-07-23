@@ -23,6 +23,7 @@
   },
   "scripts": {
     "lint": [
+      "@php -l index.php",
       "@php -l src/BenchmarkConfig.php",
       "@php -l src/BenchmarkConsole.php",
       "@php -l src/BenchmarkRunner.php",

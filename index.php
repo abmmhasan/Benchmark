@@ -23,6 +23,18 @@ $validJsonResponse = static function (string $response): bool {
         && is_numeric($payload['memory']);
 };
 
+$extractResponseMemory = static function (string $response): int|float|null {
+    try {
+        $payload = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException) {
+        return null;
+    }
+
+    return is_array($payload) && isset($payload['memory']) && is_numeric($payload['memory'])
+        ? (float) $payload['memory']
+        : null;
+};
+
 /* ------------------------------------------------------------------ *
  *  1)  Define the­ “unique” parts for each target endpoint            *
  * ------------------------------------------------------------------ */
@@ -34,6 +46,7 @@ $webrick = new BenchmarkConfig(
     container: 'PHP_8.4',
     name: 'webrick',
     responseValidator: $validJsonResponse,
+    responseMemoryExtractor: $extractResponseMemory,
 );
 
 $laravel = new BenchmarkConfig(
@@ -44,6 +57,7 @@ $laravel = new BenchmarkConfig(
     container: 'PHP_8.4',
     name: 'laravel',
     responseValidator: $validJsonResponse,
+    responseMemoryExtractor: $extractResponseMemory,
 );
 
 $infbyte = new BenchmarkConfig(
@@ -54,6 +68,7 @@ $infbyte = new BenchmarkConfig(
     container: 'PHP_8.4',
     name: 'infbyte',
     responseValidator: $validJsonResponse,
+    responseMemoryExtractor: $extractResponseMemory,
 );
 
 $raw = new BenchmarkConfig(
@@ -64,6 +79,7 @@ $raw = new BenchmarkConfig(
     container: 'PHP_8.4',
     name: 'raw',
     responseValidator: $validJsonResponse,
+    responseMemoryExtractor: $extractResponseMemory,
 );
 
 /* ------------------------------------------------------------------ *
@@ -72,6 +88,8 @@ $raw = new BenchmarkConfig(
 $runner = BenchmarkRunner::make()
     ->threads(100)
     ->count(5000)
+    ->repetitions(3)
+    ->stabilityThreshold(5)
     ->minimumDuration(10)
     ->piping(PipingMode::Optimal)
     ->timeout(2)

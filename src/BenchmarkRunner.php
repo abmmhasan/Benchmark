@@ -22,6 +22,7 @@ final class BenchmarkRunner
     private int $repetitions = 3;
     private int $warmUpRequests = 10;
     private float $minimumDurationSeconds = 10.0;
+    private float $maximumRpmSpreadPercent = 5.0;
 
     /** @var list<int> */
     private array $requestedConcurrencyLevels = [];
@@ -96,10 +97,19 @@ final class BenchmarkRunner
 
     public function repetitions(int $repetitions): self
     {
-        if ($repetitions < 3 || $repetitions > 20) {
-            throw new InvalidArgumentException('Repetitions must be between 3 and 20');
+        if ($repetitions < 1 || $repetitions > 3) {
+            throw new InvalidArgumentException('Repetitions must be between 1 and 3');
         }
         $this->repetitions = $repetitions;
+        return $this;
+    }
+
+    public function stabilityThreshold(float $maximumRpmSpreadPercent): self
+    {
+        if ($maximumRpmSpreadPercent < 0 || $maximumRpmSpreadPercent > 10_000) {
+            throw new InvalidArgumentException('Stability threshold must be between 0 and 10000 percent');
+        }
+        $this->maximumRpmSpreadPercent = $maximumRpmSpreadPercent;
         return $this;
     }
 
@@ -180,29 +190,75 @@ final class BenchmarkRunner
         }
         $this->validateAllTargets($resolvedConfigs);
 
-        $results = [];
+        $states = [];
         foreach ($resolvedConfigs as $name => $config) {
-            $levels = $this->resolveConcurrencyLevels($config->getThreads());
-            $this->console->startTarget($name);
-            try {
-                $stats = $this->runConfig($name, $config, $levels);
-                $results[$name] = $stats;
-                $this->console->finishTarget(
-                    $stats['score'],
-                    $stats['multiple']['concurrency'],
-                    $stats['totalDuration'],
-                    $stats['multiple']['error_rate'],
-                );
-            } catch (Throwable $exception) {
-                $this->console->failTarget($exception->getMessage());
-                throw $exception;
+            $states[$name] = [
+                'config' => $config,
+                'levels' => $this->resolveConcurrencyLevels($config->getThreads()),
+                'runs' => [],
+                'containerStats' => [],
+                'totalDuration' => 0.0,
+                'completedPhases' => 0,
+            ];
+        }
+
+        $targetNames = array_keys($states);
+        for ($run = 1; $run <= $this->repetitions; ++$run) {
+            $targetOrder = self::rotate($targetNames, $run - 1);
+            foreach ($targetOrder as $name) {
+                $this->console->startTarget($name);
+                try {
+                    $iteration = $this->runRepetition(
+                        $name,
+                        $states[$name]['config'],
+                        $states[$name]['levels'],
+                        $run,
+                        $states[$name]['completedPhases'],
+                    );
+                    $iteration['run']['targetOrder'] = $targetOrder;
+                    $states[$name]['runs'][] = $iteration['run'];
+                    $states[$name]['containerStats'][] = $iteration['container'];
+                    $states[$name]['totalDuration'] += $iteration['duration'];
+                } catch (Throwable $exception) {
+                    $this->console->failTarget($exception->getMessage());
+                    throw $exception;
+                }
             }
         }
 
-        uasort($results, static fn(array $left, array $right): int => $right['score'] <=> $left['score']);
+        $results = [];
+        foreach ($states as $name => $state) {
+            $stats = $this->aggregateConfig(
+                $name,
+                $state['config'],
+                $state['levels'],
+                $state['runs'],
+                $state['containerStats'],
+                $state['totalDuration'],
+            );
+            $results[$name] = $stats;
+            $this->console->startTarget($name);
+            $this->console->finishTarget(
+                $stats['multiple']['req_per_min'],
+                $stats['multiple']['concurrency'],
+                $stats['totalDuration'],
+                $stats['multiple']['error_rate'],
+                $stats['rankingStatus'],
+            );
+        }
+
+        uasort($results, static function (array $left, array $right): int {
+            if ($left['score'] === null) {
+                return $right['score'] === null ? 0 : 1;
+            }
+            if ($right['score'] === null) {
+                return -1;
+            }
+            return $right['score'] <=> $left['score'];
+        });
         $rank = 1;
         foreach ($results as &$result) {
-            $result['rank'] = $rank++;
+            $result['rank'] = $result['score'] === null ? null : $rank++;
         }
         unset($result);
 
@@ -211,92 +267,124 @@ final class BenchmarkRunner
         return $results;
     }
 
-    /** @param list<int> $levels */
-    private function runConfig(string $name, BenchmarkConfig $config, array $levels): array
+    /**
+     * @param list<int> $levels
+     * @return array{run: array<string, mixed>, container: array<string, int|float>, duration: float}
+     */
+    private function runRepetition(
+        string $name,
+        BenchmarkConfig $config,
+        array $levels,
+        int $run,
+        int &$completedPhases,
+    ): array
     {
-        $this->console->updateTarget(0.0, 'restarting container');
+        $totalPhases = $this->repetitions * (count($levels) + 1);
+        $baseProgress = $completedPhases / $totalPhases;
+        $this->console->updateTarget($baseProgress, 'restarting container');
         $this->restartContainer($config->getContainer());
         $sampler = $config->getContainer() !== null
             ? new ContainerStats($config->getContainer(), $config->getSampleInterval())
             : null;
-        $containerStats = [];
         $startedAt = hrtime(true);
-        $totalPhases = $this->repetitions * (count($levels) + 1);
-        $completedPhases = 0;
+        $containerStats = [];
 
         try {
             $probe = new RequestBenchmark($config);
             if (!$config->skipPreflight()) {
-                $this->console->updateTarget(0.0, 'waiting for endpoint');
+                $this->console->updateTarget($baseProgress, 'waiting for endpoint');
                 $this->waitForEndpoint($probe, $name);
             }
             $safeWarmUp = in_array($config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)
                 ? $this->warmUpRequests
                 : 0;
-            $this->console->updateTarget(0.0, "warming {$safeWarmUp} requests");
+            $this->console->updateTarget($baseProgress, "warming {$safeWarmUp} requests");
             $probe->warmUp($safeWarmUp);
             $sampler?->start();
 
-            $runs = [];
-            for ($run = 1; $run <= $this->repetitions; ++$run) {
-                $progress = function (
-                    int $completed,
-                    int $minimumRequests,
-                    float $elapsed,
-                    float $minimumDuration,
-                    string $phase,
-                ) use (&$completedPhases, $totalPhases, $run): void {
-                    $requestProgress = min(1.0, $completed / $minimumRequests);
-                    $durationProgress = $minimumDuration > 0
-                        ? min(1.0, $elapsed / $minimumDuration)
-                        : 1.0;
-                    $phaseProgress = min($requestProgress, $durationProgress);
-                    $overallProgress = ($completedPhases + $phaseProgress) / $totalPhases;
-                    $this->console->updateTarget(
-                        $overallProgress,
-                        sprintf(
-                            'run %d/%d · %s · %d req · %.1fs',
-                            $run,
-                            $this->repetitions,
-                            $phase,
-                            $completed,
-                            $elapsed,
-                        ),
-                    );
-                };
+            $progress = function (
+                int $completed,
+                int $minimumRequests,
+                float $elapsed,
+                float $minimumDuration,
+                string $phase,
+            ) use (&$completedPhases, $totalPhases, $run, $sampler): void {
+                $sampler?->maybeSample();
+                $requestProgress = min(1.0, $completed / $minimumRequests);
+                $durationProgress = $minimumDuration > 0
+                    ? min(1.0, $elapsed / $minimumDuration)
+                    : 1.0;
+                $phaseProgress = min($requestProgress, $durationProgress);
+                $overallProgress = ($completedPhases + $phaseProgress) / $totalPhases;
+                $this->console->updateTarget(
+                    $overallProgress,
+                    sprintf(
+                        'run %d/%d · %s · %d req · %.1fs',
+                        $run,
+                        $this->repetitions,
+                        $phase,
+                        $completed,
+                        $elapsed,
+                    ),
+                );
+            };
 
-                $benchmark = new RequestBenchmark($config, $progress);
-                $benchmark->resetMeasurements();
-                $single = $benchmark->runSingleThreaded();
+            $benchmark = new RequestBenchmark($config, $progress);
+            $benchmark->resetMeasurements();
+            $single = $benchmark->runSingleThreaded();
+            ++$completedPhases;
+            $sampler?->maybeSample();
+
+            $concurrent = [];
+            $concurrencyOrder = self::rotate($levels, $run - 1);
+            foreach ($concurrencyOrder as $level) {
+                $concurrent[$level] = $benchmark->runConcurrent($level, $this->minimumDurationSeconds);
                 ++$completedPhases;
                 $sampler?->maybeSample();
-
-                $concurrent = [];
-                foreach ($levels as $level) {
-                    $concurrent[$level] = $benchmark->runConcurrent($level, $this->minimumDurationSeconds);
-                    ++$completedPhases;
-                    $sampler?->maybeSample();
-                }
-
-                $runs[] = [
-                    'single' => $single,
-                    'concurrency' => $concurrent,
-                    'remoteMemoryMB' => $benchmark->getRemoteMemoryMB(),
-                ];
             }
+
+            $measurement = [
+                'single' => $single,
+                'concurrency' => $concurrent,
+                'concurrencyOrder' => $concurrencyOrder,
+                'remoteMemoryMB' => $benchmark->getRemoteMemoryMB(),
+            ];
         } finally {
             if ($sampler !== null) {
                 $containerStats = $sampler->finish();
             }
         }
 
+        return [
+            'run' => $measurement,
+            'container' => $containerStats,
+            'duration' => self::secondsSince($startedAt),
+        ];
+    }
+
+    /**
+     * @param list<int> $levels
+     * @param list<array<string, mixed>> $runs
+     * @param list<array<string, int|float>> $containerStats
+     */
+    private function aggregateConfig(
+        string $name,
+        BenchmarkConfig $config,
+        array $levels,
+        array $runs,
+        array $containerStats,
+        float $totalDuration,
+    ): array {
         $throughputCurve = [];
         foreach ($levels as $level) {
             $measurements = [];
             foreach ($runs as $run) {
                 $measurements[] = $run['concurrency'][$level];
             }
-            $throughputCurve[$level] = self::medianMetrics($measurements);
+            $throughputCurve[$level] = self::medianMetrics(
+                $measurements,
+                $this->maximumRpmSpreadPercent,
+            );
         }
 
         $singleMeasurements = [];
@@ -308,21 +396,24 @@ final class BenchmarkRunner
             }
         }
 
-        $peakConcurrency = $levels[0];
-        $steadyLevelFound = false;
+        $selectedConcurrency = null;
+        $minimumWindowFound = false;
         foreach ($levels as $level) {
-            if ($throughputCurve[$level]['steady_state_reached'] !== true) {
+            if ($throughputCurve[$level]['minimum_window_reached'] !== true) {
+                continue;
+            }
+            $minimumWindowFound = true;
+            if ($throughputCurve[$level]['rpm_stability'] === 'unstable') {
                 continue;
             }
             if (
-                !$steadyLevelFound
-                || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$peakConcurrency]['req_per_min']
+                $selectedConcurrency === null
+                || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$selectedConcurrency]['req_per_min']
             ) {
-                $peakConcurrency = $level;
-                $steadyLevelFound = true;
+                $selectedConcurrency = $level;
             }
         }
-        if (!$steadyLevelFound) {
+        if (!$minimumWindowFound) {
             throw new RuntimeException(sprintf(
                 'No concurrency phase for %s reached the %.2f second minimum before the request safety limit',
                 $name,
@@ -330,20 +421,42 @@ final class BenchmarkRunner
             ));
         }
 
-        $multiple = $throughputCurve[$peakConcurrency];
+        $rankingStatus = 'stable';
+        if ($selectedConcurrency === null) {
+            $rankingStatus = 'inconclusive';
+            foreach ($levels as $level) {
+                if (
+                    $throughputCurve[$level]['minimum_window_reached'] === true
+                    && (
+                        $selectedConcurrency === null
+                        || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$selectedConcurrency]['req_per_min']
+                    )
+                ) {
+                    $selectedConcurrency = $level;
+                }
+            }
+        } elseif ($throughputCurve[$selectedConcurrency]['rpm_stability'] === 'unverified') {
+            $rankingStatus = 'unverified';
+        }
+
+        $multiple = $throughputCurve[$selectedConcurrency];
+        $safeWarmUp = in_array($config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)
+            ? $this->warmUpRequests
+            : 0;
         return [
             'name' => $name,
-            'single' => self::medianMetrics($singleMeasurements),
+            'single' => self::medianMetrics($singleMeasurements, $this->maximumRpmSpreadPercent),
             'multiple' => $multiple,
             'throughputCurve' => $throughputCurve,
             'runs' => $runs,
-            'totalDuration' => self::secondsSince($startedAt),
+            'totalDuration' => round($totalDuration, 5),
             'remoteMemoryMB' => $remoteMemoryMeasurements === []
                 ? null
                 : round(self::median($remoteMemoryMeasurements), 2),
-            'container' => $containerStats,
+            'container' => self::combineContainerStats($containerStats),
             'configuration' => $this->configurationMetadata($config, $levels, $safeWarmUp),
-            'score' => (float) $multiple['req_per_min'],
+            'rankingStatus' => $rankingStatus,
+            'score' => $rankingStatus === 'inconclusive' ? null : (float) $multiple['req_per_min'],
         ];
     }
 
@@ -422,6 +535,7 @@ final class BenchmarkRunner
             name: $config->getName(),
             skipPreflight: $config->skipPreflight(),
             responseValidator: $config->getResponseValidator(),
+            responseMemoryExtractor: $config->getResponseMemoryExtractor(),
         );
     }
 
@@ -570,8 +684,8 @@ final class BenchmarkRunner
         return [$exitCode, $output, $error];
     }
 
-    /** @param list<array<string, int|float|null>> $measurements */
-    private static function medianMetrics(array $measurements): array
+    /** @param list<array<string, int|float|bool|null>> $measurements */
+    private static function medianMetrics(array $measurements, float $maximumRpmSpreadPercent): array
     {
         $result = [];
         foreach (array_keys($measurements[0]) as $key) {
@@ -608,7 +722,59 @@ final class BenchmarkRunner
             $rpmMedian > 0 ? ((max($rpmValues) - min($rpmValues)) / $rpmMedian) * 100 : 0,
             5,
         );
+        $result['rpm_stability'] = count($rpmValues) < 2
+            ? 'unverified'
+            : (
+                $result['req_per_min_spread_percent'] <= $maximumRpmSpreadPercent
+                    ? 'stable'
+                    : 'unstable'
+            );
         return $result;
+    }
+
+    /** @param list<mixed> $values */
+    private static function rotate(array $values, int $offset): array
+    {
+        $count = count($values);
+        if ($count < 2) {
+            return array_values($values);
+        }
+
+        $offset %= $count;
+        return [...array_slice($values, $offset), ...array_slice($values, 0, $offset)];
+    }
+
+    /** @param list<array<string, int|float>> $measurements */
+    private static function combineContainerStats(array $measurements): array
+    {
+        $samples = 0;
+        $memoryTotal = 0.0;
+        $cpuTotal = 0.0;
+        $peakMemory = 0.0;
+        $peakCpu = 0.0;
+        foreach ($measurements as $measurement) {
+            $measurementSamples = (int) ($measurement['samples'] ?? 0);
+            if ($measurementSamples < 1) {
+                continue;
+            }
+            $samples += $measurementSamples;
+            $memoryTotal += (float) $measurement['avgMemMB'] * $measurementSamples;
+            $cpuTotal += (float) $measurement['avgCPU'] * $measurementSamples;
+            $peakMemory = max($peakMemory, (float) $measurement['peakMemMB']);
+            $peakCpu = max($peakCpu, (float) $measurement['peakCPU']);
+        }
+
+        if ($samples === 0) {
+            return [];
+        }
+
+        return [
+            'samples' => $samples,
+            'avgMemMB' => round($memoryTotal / $samples, 5),
+            'peakMemMB' => round($peakMemory, 5),
+            'avgCPU' => round($cpuTotal / $samples, 5),
+            'peakCPU' => round($peakCpu, 5),
+        ];
     }
 
     /** @param list<int|float> $values */
@@ -639,6 +805,7 @@ final class BenchmarkRunner
             'maxConcurrency' => $config->getThreads(),
             'concurrencyLevels' => $levels,
             'repetitions' => $this->repetitions,
+            'maximumRpmSpreadPercent' => $this->maximumRpmSpreadPercent,
             'warmUpRequests' => $warmUp,
             'minimumDurationSeconds' => $this->minimumDurationSeconds,
             'timeoutSeconds' => $config->getTimeout(),
@@ -652,6 +819,7 @@ final class BenchmarkRunner
             'hasRequestBody' => $config->getBody() !== null,
             'customCurlOptions' => array_keys($config->getCurlOptions()),
             'responseValidation' => true,
+            'responseMemoryExtraction' => $config->getResponseMemoryExtractor() !== null,
             'phpVersion' => PHP_VERSION,
             'phpSapi' => PHP_SAPI,
             'memoryLimit' => ini_get('memory_limit'),
@@ -680,6 +848,7 @@ final class BenchmarkRunner
                 $name,
                 self::displayNumber($result['score'], 0),
                 $multiple['concurrency'],
+                ucfirst($result['rankingStatus']),
                 self::displayNumber($result['totalDuration'], 1),
             ];
 
@@ -687,11 +856,19 @@ final class BenchmarkRunner
             $serialReliabilityRows[] = self::reliabilityRow($name, $result['single']);
 
             foreach ($result['throughputCurve'] as $concurrency => $metrics) {
+                $runRpms = [];
+                foreach ($result['runs'] as $run) {
+                    $runRpms[] = self::displayNumber(
+                        $run['concurrency'][$concurrency]['req_per_min'],
+                        0,
+                    );
+                }
                 $curveRows[$concurrency][] = [
                     $name,
                     self::displayNumber($metrics['req_per_min'], 0),
-                    self::displayNumber($metrics['req_per_min_mad'], 2),
                     self::displayPercent($metrics['req_per_min_spread_percent']),
+                    ucfirst($metrics['rpm_stability']),
+                    ...$runRpms,
                 ];
                 $concurrentLatencyRows[$concurrency][] = self::latencyRow($name, $metrics);
                 $concurrentReliabilityRows[$concurrency][] = self::reliabilityRow($name, $metrics);
@@ -770,14 +947,18 @@ final class BenchmarkRunner
 
         $sections = [
             self::markdownTable('Ranking',
-                ['Rank', 'Target', 'Selected RPM', 'Peak concurrency', 'Duration s'],
+                ['Rank', 'Target', 'Selected RPM', 'Selected concurrency', 'Status', 'Duration s'],
                 $summaryRows,
             ),
         ];
         ksort($curveRows, SORT_NUMERIC);
         foreach ($curveRows as $concurrency => $rows) {
+            $runHeaders = [];
+            for ($run = 1; $run <= $this->repetitions; ++$run) {
+                $runHeaders[] = "Run {$run} RPM";
+            }
             $sections[] = self::markdownTable("Throughput — concurrency {$concurrency}",
-                ['Target', 'Validated RPM', 'RPM MAD', 'RPM spread'],
+                ['Target', 'Median RPM', 'RPM spread', 'Stability', ...$runHeaders],
                 $rows,
             );
         }
@@ -813,7 +994,7 @@ final class BenchmarkRunner
             $sections[] = self::markdownTable('Common configuration', ['Setting', 'Value'], $commonRows);
         }
         if ($environmentRows !== []) {
-            $sections[] = self::markdownTable('Runtime environment', ['Setting', 'Value'], $environmentRows);
+            $sections[] = self::markdownTable('Load-generator environment', ['Setting', 'Value'], $environmentRows);
         }
         if ($targetRows !== []) {
             $sections[] = self::markdownTable(

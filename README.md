@@ -29,6 +29,7 @@ $results = BenchmarkRunner::make()
     ->minimumDuration(10)
     ->timeout(10)
     ->repetitions(3)
+    ->stabilityThreshold(5)
     ->concurrencyLevels(2, 25, 50, 100)
     ->warmUpRequests(10)
     ->addConfigs($config)
@@ -38,10 +39,16 @@ echo $results;
 ```
 
 The default concurrency curve is derived from the configured maximum when
-`concurrencyLevels()` is omitted. Each target is measured at every level for at
-least three repetitions. Concurrent phases continue for at least the configured
-minimum duration, subject to the hard request safety limit. Ranking uses the peak
-median validated requests per minute from phases that reached that duration.
+`concurrencyLevels()` is omitted. Repetitions are configurable from one to three
+and default to three. Target and concurrency order rotate between repetitions to
+reduce time and phase-order bias. Concurrent phases continue for at least the
+configured minimum duration, subject to the hard request safety limit.
+
+With two or three repetitions, a concurrency level is stable only when its RPM
+spread is within `stabilityThreshold()` (5% by default). Unstable levels remain in
+the report but cannot determine ranking. A target with no stable level is marked
+inconclusive and left unranked. One-repetition results are explicitly marked
+unverified.
 
 Automatic warm-up is limited to GET and HEAD. Preflight always uses a bodyless
 HEAD probe, so configured POST, PUT, PATCH, and DELETE operations are not executed
@@ -74,10 +81,30 @@ php index.php > benchmark.md
 The Markdown report is organized for side-by-side comparison. Every concurrency
 level gets separate throughput, latency, and reliability tables, while serial
 measurements remain in their own latency and reliability tables. Configuration
-differences are pivoted by target. Shared settings, runtime environment, and
-optional container resources remain separate. JSON is the canonical
+differences are pivoted by target. Shared settings, load-generator environment,
+and optional container resources remain separate. JSON is the canonical
 machine-readable output and CSV remains available for flat data-processing
 workflows.
+
+Each throughput table includes the individual run RPM values, total spread, and
+stability decision so an outlier cannot be hidden by the median.
+
+Response-memory telemetry is optional and has no implicit JSON contract. Supply a
+callback only when the response exposes memory usage; return bytes or `null`:
+
+```php
+$config = new BenchmarkConfig(
+    url: 'https://service.example.test/health',
+    name: 'service',
+    responseValidator: static fn(string $body): bool => $body !== '',
+    responseMemoryExtractor: static function (string $body): int|float|null {
+        $json = json_decode($body, true);
+        return is_array($json) && is_numeric($json['memory'] ?? null)
+            ? (float) $json['memory']
+            : null;
+    },
+);
+```
 
 ## Result interpretation
 
