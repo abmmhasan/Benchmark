@@ -343,21 +343,60 @@ namespace {
         'ranking does not repeat detailed throughput or latency fields',
     );
 
-    $groupData = ['first' => $result, 'second' => $result];
-    $groupData['second']['configuration']['url'] = 'http://second.example.test';
+    $groupData = ['slow' => $result, 'fast' => $result];
+    $groupData['slow']['name'] = 'slow';
+    $groupData['slow']['rank'] = 2;
+    $groupData['slow']['score'] = 100.0;
+    $groupData['slow']['configuration']['url'] = 'http://slow.example.test';
+    $groupData['slow']['throughputCurve'][2]['req_per_min'] = 300.0;
+    $groupData['slow']['single']['p50'] = 0.04;
+    $groupData['slow']['single']['error_rate'] = 0.0;
+    $groupData['fast']['name'] = 'fast';
+    $groupData['fast']['rank'] = 1;
+    $groupData['fast']['score'] = 200.0;
+    $groupData['fast']['configuration']['url'] = 'http://fast.example.test';
+    $groupData['fast']['throughputCurve'][2]['req_per_min'] = 200.0;
+    $groupData['fast']['single']['p50'] = 0.02;
+    $groupData['fast']['single']['error_rate'] = 0.1;
     $groupConfiguration = new ReflectionMethod(BenchmarkRunner::class, 'groupConfiguration');
     [$commonConfiguration, $specificConfiguration] = $groupConfiguration->invoke(null, $groupData);
     $assert(isset($commonConfiguration['method']), 'identical configuration is grouped once');
     $assert(
-        isset($specificConfiguration['first']['url'], $specificConfiguration['second']['url']),
+        isset($specificConfiguration['slow']['url'], $specificConfiguration['fast']['url']),
         'different target configuration remains per target',
     );
     $comparisonMarkdown = $toMarkdownTable->invoke($perConfigRunner, $groupData);
     $assert(
-        str_contains($comparisonMarkdown, '| Setting | first | second |'),
-        'target-specific configuration is pivoted for comparison',
+        str_contains($comparisonMarkdown, '| Setting | fast | slow |'),
+        'target-specific configuration follows overall benchmark rank',
     );
     $assert(!str_contains($comparisonMarkdown, '| Recorded at |'), 'timestamps are not presented as configuration');
+    $tableSection = static function (string $markdown, string $title): string {
+        preg_match(
+            '/## ' . preg_quote($title, '/') . '\R\R(?<table>.*?)(?=\R\R## |\z)/s',
+            $markdown,
+            $match,
+        );
+        return $match['table'] ?? '';
+    };
+    $appearsBefore = static fn(string $table, string $first, string $second): bool =>
+        strpos($table, "| {$first} |") < strpos($table, "| {$second} |");
+    $assert(
+        $appearsBefore($tableSection($comparisonMarkdown, 'Ranking'), 'fast', 'slow'),
+        'ranking rows are ordered by selected RPM descending',
+    );
+    $assert(
+        $appearsBefore($tableSection($comparisonMarkdown, 'Throughput — concurrency 2'), 'slow', 'fast'),
+        'throughput rows are ordered by median RPM descending',
+    );
+    $assert(
+        $appearsBefore($tableSection($comparisonMarkdown, 'Latency — serial'), 'fast', 'slow'),
+        'latency rows are ordered by p50 ascending',
+    );
+    $assert(
+        $appearsBefore($tableSection($comparisonMarkdown, 'Reliability — serial'), 'slow', 'fast'),
+        'reliability rows are ordered by error rate ascending',
+    );
 
     $medianMetrics = new ReflectionMethod(BenchmarkRunner::class, 'medianMetrics');
     $unstableMeasurements = [];
@@ -409,8 +448,9 @@ namespace {
         1.0,
     );
     $assert(
-        $inconclusive['score'] === null && $inconclusive['rankingStatus'] === 'inconclusive',
-        'a target with no stable concurrency is excluded from ranking',
+        $inconclusive['score'] === $inconclusive['multiple']['req_per_min']
+        && $inconclusive['rankingStatus'] === 'unstable',
+        'a target with no stable concurrency remains ranked with an unstable warning',
     );
 
     $unit = UnitBenchmark::run(static function (): int {

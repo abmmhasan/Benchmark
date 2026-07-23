@@ -38,7 +38,7 @@ final class BenchmarkConsole
     {
         render(sprintf(
             '<div class="mb-1"><span class="px-1 bg-cyan-600 text-white font-bold">HTTP BENCHMARK</span>'
-            . '<span class="ml-1 text-gray">%d targets · %d repetitions</span></div>',
+            . '<span class="ml-1 text-gray">%d targets · %d repetitions · sequential</span></div>',
             $targets,
             $repetitions,
         ));
@@ -112,6 +112,20 @@ final class BenchmarkConsole
         }
 
         $this->sections[$this->target]->overwrite(self::progressLine($this->target, $fraction, $message));
+    }
+
+    public function pauseTarget(int $run, int $repetitions, float $fraction): void
+    {
+        if ($this->interactive && $this->target !== null && isset($this->sections[$this->target])) {
+            $this->sections[$this->target]->overwrite(
+                self::progressLine(
+                    $this->target,
+                    $fraction,
+                    sprintf('<fg=yellow>waiting · repetition %d/%d complete</>', $run, $repetitions),
+                ),
+            );
+        }
+        $this->target = null;
     }
 
     public function finishTarget(

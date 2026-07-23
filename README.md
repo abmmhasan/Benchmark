@@ -41,13 +41,16 @@ echo $results;
 The default concurrency curve is derived from the configured maximum when
 `concurrencyLevels()` is omitted. Repetitions are configurable from one to three
 and default to three. Target and concurrency order rotate between repetitions to
-reduce time and phase-order bias. Concurrent phases continue for at least the
-configured minimum duration, subject to the hard request safety limit.
+reduce time and phase-order bias. Targets are always benchmarked sequentially:
+the runner completely awaits one target before sending benchmark traffic to the
+next target. Concurrent phases continue for at least the configured minimum
+duration, subject to the hard request safety limit.
 
 With two or three repetitions, a concurrency level is stable only when its RPM
 spread is within `stabilityThreshold()` (5% by default). Unstable levels remain in
-the report but cannot determine ranking. A target with no stable level is marked
-inconclusive and left unranked. One-repetition results are explicitly marked
+the report and a stable level is preferred when selecting a target's ranking RPM.
+When a target has no stable level, its fastest measured median remains ranked but
+is explicitly marked unstable. One-repetition results are explicitly marked
 unverified.
 
 Automatic warm-up is limited to GET and HEAD. Preflight always uses a bodyless
@@ -69,7 +72,8 @@ status and response validator. Mutating methods are not executed during this pas
 Termwind and Symfony Console render a dedicated progress line for each benchmark
 configuration. Progress combines completed request iterations and the configured
 minimum phase duration, so a duration-bound concurrency phase does not appear
-complete while it is still collecting steady-state traffic.
+complete while it is still collecting measurement-window traffic. Inactive target
+lines are explicitly labelled `waiting`; they do not represent concurrent load.
 
 Progress is written only to standard error. Redirecting a report therefore keeps
 the output file clean while progress remains visible:
@@ -88,6 +92,10 @@ workflows.
 
 Each throughput table includes the individual run RPM values, total spread, and
 stability decision so an outlier cannot be hidden by the median.
+Comparison rows are ordered best to worst: highest RPM for throughput, lowest p50
+for latency, and lowest error rate for reliability. Resource and configuration
+comparisons follow overall benchmark rank because resource usage alone does not
+define the fastest sustainable target.
 
 Response-memory telemetry is optional and has no implicit JSON contract. Supply a
 callback only when the response exposes memory usage; return bytes or `null`:

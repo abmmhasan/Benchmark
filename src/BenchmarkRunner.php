@@ -219,6 +219,12 @@ final class BenchmarkRunner
                     $states[$name]['runs'][] = $iteration['run'];
                     $states[$name]['containerStats'][] = $iteration['container'];
                     $states[$name]['totalDuration'] += $iteration['duration'];
+                    $totalPhases = $this->repetitions * (count($states[$name]['levels']) + 1);
+                    $this->console->pauseTarget(
+                        $run,
+                        $this->repetitions,
+                        $states[$name]['completedPhases'] / $totalPhases,
+                    );
                 } catch (Throwable $exception) {
                     $this->console->failTarget($exception->getMessage());
                     throw $exception;
@@ -247,15 +253,7 @@ final class BenchmarkRunner
             );
         }
 
-        uasort($results, static function (array $left, array $right): int {
-            if ($left['score'] === null) {
-                return $right['score'] === null ? 0 : 1;
-            }
-            if ($right['score'] === null) {
-                return -1;
-            }
-            return $right['score'] <=> $left['score'];
-        });
+        uasort($results, self::compareResults(...));
         $rank = 1;
         foreach ($results as &$result) {
             $result['rank'] = $result['score'] === null ? null : $rank++;
@@ -423,7 +421,7 @@ final class BenchmarkRunner
 
         $rankingStatus = 'stable';
         if ($selectedConcurrency === null) {
-            $rankingStatus = 'inconclusive';
+            $rankingStatus = 'unstable';
             foreach ($levels as $level) {
                 if (
                     $throughputCurve[$level]['minimum_window_reached'] === true
@@ -456,7 +454,7 @@ final class BenchmarkRunner
             'container' => self::combineContainerStats($containerStats),
             'configuration' => $this->configurationMetadata($config, $levels, $safeWarmUp),
             'rankingStatus' => $rankingStatus,
-            'score' => $rankingStatus === 'inconclusive' ? null : (float) $multiple['req_per_min'],
+            'score' => (float) $multiple['req_per_min'],
         ];
     }
 
@@ -834,6 +832,8 @@ final class BenchmarkRunner
 
     private function toMarkdownTable(array $data): string
     {
+        uasort($data, self::compareResults(...));
+
         $summaryRows = [];
         $serialLatencyRows = [];
         $concurrentLatencyRows = [];
@@ -852,8 +852,8 @@ final class BenchmarkRunner
                 self::displayNumber($result['totalDuration'], 1),
             ];
 
-            $serialLatencyRows[] = self::latencyRow($name, $result['single']);
-            $serialReliabilityRows[] = self::reliabilityRow($name, $result['single']);
+            $serialLatencyRows[$name] = self::latencyRow($name, $result['single']);
+            $serialReliabilityRows[$name] = self::reliabilityRow($name, $result['single']);
 
             foreach ($result['throughputCurve'] as $concurrency => $metrics) {
                 $runRpms = [];
@@ -863,15 +863,15 @@ final class BenchmarkRunner
                         0,
                     );
                 }
-                $curveRows[$concurrency][] = [
+                $curveRows[$concurrency][$name] = [
                     $name,
                     self::displayNumber($metrics['req_per_min'], 0),
                     self::displayPercent($metrics['req_per_min_spread_percent']),
                     ucfirst($metrics['rpm_stability']),
                     ...$runRpms,
                 ];
-                $concurrentLatencyRows[$concurrency][] = self::latencyRow($name, $metrics);
-                $concurrentReliabilityRows[$concurrency][] = self::reliabilityRow($name, $metrics);
+                $concurrentLatencyRows[$concurrency][$name] = self::latencyRow($name, $metrics);
+                $concurrentReliabilityRows[$concurrency][$name] = self::reliabilityRow($name, $metrics);
             }
 
             if ($result['container'] !== []) {
@@ -953,35 +953,65 @@ final class BenchmarkRunner
         ];
         ksort($curveRows, SORT_NUMERIC);
         foreach ($curveRows as $concurrency => $rows) {
+            uksort($rows, fn(string $left, string $right): int => self::compareThroughput(
+                $data[$left]['throughputCurve'][$concurrency],
+                $data[$right]['throughputCurve'][$concurrency],
+                $left,
+                $right,
+            ));
             $runHeaders = [];
             for ($run = 1; $run <= $this->repetitions; ++$run) {
                 $runHeaders[] = "Run {$run} RPM";
             }
             $sections[] = self::markdownTable("Throughput — concurrency {$concurrency}",
                 ['Target', 'Median RPM', 'RPM spread', 'Stability', ...$runHeaders],
-                $rows,
+                array_values($rows),
             );
         }
+        uksort($serialLatencyRows, fn(string $left, string $right): int => self::compareLatency(
+            $data[$left]['single'],
+            $data[$right]['single'],
+            $left,
+            $right,
+        ));
         $sections[] = self::markdownTable('Latency — serial',
             ['Target', 'p50 ms', 'p95 ms', 'p99 ms', 'Connect ms', 'TTFB ms'],
-            $serialLatencyRows,
+            array_values($serialLatencyRows),
         );
         ksort($concurrentLatencyRows, SORT_NUMERIC);
         foreach ($concurrentLatencyRows as $concurrency => $rows) {
+            uksort($rows, fn(string $left, string $right): int => self::compareLatency(
+                $data[$left]['throughputCurve'][$concurrency],
+                $data[$right]['throughputCurve'][$concurrency],
+                $left,
+                $right,
+            ));
             $sections[] = self::markdownTable("Latency — concurrency {$concurrency}",
                 ['Target', 'p50 ms', 'p95 ms', 'p99 ms', 'Connect ms', 'TTFB ms'],
-                $rows,
+                array_values($rows),
             );
         }
+        uksort($serialReliabilityRows, fn(string $left, string $right): int => self::compareReliability(
+            $data[$left]['single'],
+            $data[$right]['single'],
+            $left,
+            $right,
+        ));
         $sections[] = self::markdownTable('Reliability — serial',
             ['Target', 'Attempted', 'Successful', 'Error rate', 'Transfer', 'Timeout', 'Status', 'Validation'],
-            $serialReliabilityRows,
+            array_values($serialReliabilityRows),
         );
         ksort($concurrentReliabilityRows, SORT_NUMERIC);
         foreach ($concurrentReliabilityRows as $concurrency => $rows) {
+            uksort($rows, fn(string $left, string $right): int => self::compareReliability(
+                $data[$left]['throughputCurve'][$concurrency],
+                $data[$right]['throughputCurve'][$concurrency],
+                $left,
+                $right,
+            ));
             $sections[] = self::markdownTable("Reliability — concurrency {$concurrency}",
                 ['Target', 'Attempted', 'Successful', 'Error rate', 'Transfer', 'Timeout', 'Status', 'Validation'],
-                $rows,
+                array_values($rows),
             );
         }
         if ($resourceRows !== []) {
@@ -1005,6 +1035,60 @@ final class BenchmarkRunner
         }
 
         return implode("\n\n", $sections) . "\n";
+    }
+
+    private static function compareResults(array $left, array $right): int
+    {
+        if ($left['score'] === null) {
+            return $right['score'] === null
+                ? strcmp((string) $left['name'], (string) $right['name'])
+                : 1;
+        }
+        if ($right['score'] === null) {
+            return -1;
+        }
+
+        return ((float) $right['score'] <=> (float) $left['score'])
+            ?: strcmp((string) $left['name'], (string) $right['name']);
+    }
+
+    private static function compareThroughput(
+        array $left,
+        array $right,
+        string $leftName,
+        string $rightName,
+    ): int {
+        return ((float) $right['req_per_min'] <=> (float) $left['req_per_min'])
+            ?: ((float) $left['error_rate'] <=> (float) $right['error_rate'])
+            ?: ((float) $left['p50'] <=> (float) $right['p50'])
+            ?: strcmp($leftName, $rightName);
+    }
+
+    private static function compareLatency(
+        array $left,
+        array $right,
+        string $leftName,
+        string $rightName,
+    ): int {
+        return ((float) $left['p50'] <=> (float) $right['p50'])
+            ?: ((float) $left['p95'] <=> (float) $right['p95'])
+            ?: ((float) $left['p99'] <=> (float) $right['p99'])
+            ?: strcmp($leftName, $rightName);
+    }
+
+    private static function compareReliability(
+        array $left,
+        array $right,
+        string $leftName,
+        string $rightName,
+    ): int {
+        $leftFailures = $left['attempted_requests'] - $left['successful_requests'];
+        $rightFailures = $right['attempted_requests'] - $right['successful_requests'];
+
+        return ((float) $left['error_rate'] <=> (float) $right['error_rate'])
+            ?: ($leftFailures <=> $rightFailures)
+            ?: ($right['successful_requests'] <=> $left['successful_requests'])
+            ?: strcmp($leftName, $rightName);
     }
 
     private static function latencyRow(string $name, array $metrics): array
