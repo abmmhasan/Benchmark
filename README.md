@@ -48,10 +48,11 @@ duration, subject to the hard request safety limit.
 
 With two or three repetitions, a concurrency level is stable only when its RPM
 spread is within `stabilityThreshold()` (5% by default). Unstable levels remain in
-the report and a stable level is preferred when selecting a target's ranking RPM.
-When a target has no stable level, its fastest measured median remains ranked but
-is explicitly marked unstable. One-repetition results are explicitly marked
-unverified.
+the report, but only the fastest stable level contributes to the sustainable
+ranking. The summary also reports each target's fastest observed median and its
+stability independently. A target with no stable level therefore keeps its peak
+visible without receiving a sustainable rank. One-repetition results are
+explicitly marked unverified and are not treated as stable.
 
 Automatic warm-up is limited to GET and HEAD. Preflight always uses a bodyless
 HEAD probe, so configured POST, PUT, PATCH, and DELETE operations are not executed
@@ -90,6 +91,13 @@ and optional container resources remain separate. JSON is the canonical
 machine-readable output and CSV remains available for flat data-processing
 workflows.
 
+The first table is a sustainable ranking rather than a peak-throughput ranking.
+It shows the best stable RPM and concurrency beside the peak observed RPM,
+concurrency, and stability. Stable targets are ranked first by sustainable RPM;
+targets with only unstable or unverified measurements remain unranked and follow
+in peak-RPM order. Compare targets at the same concurrency in the detailed tables
+when capacity curves differ.
+
 Each throughput table includes the individual run RPM values, total spread, and
 stability decision so an outlier cannot be hidden by the median.
 Comparison rows are ordered best to worst: highest RPM for throughput, lowest p50
@@ -118,7 +126,7 @@ $config = new BenchmarkConfig(
 
 Results include:
 
-- validated RPS and RPM;
+- best stable RPM, fastest observed RPM, and their concurrency levels;
 - attempted and successful request counts;
 - transfer, timeout, status, and response-validation failures;
 - p50, p95, and p99 successful-response latency;

@@ -286,7 +286,11 @@ namespace {
     $result = $results['per-config'];
     $assert(count($result['runs']) === 3, 'three repeated runs are recorded');
     $assert(array_keys($result['throughputCurve']) === [2, 4], 'default concurrency curve is recorded');
-    $assert($result['score'] === $result['multiple']['req_per_min'], 'ranking score is validated RPM');
+    $assert($result['score'] === $result['stable']['req_per_min'], 'ranking score is stable RPM');
+    $assert(
+        $result['peak']['req_per_min'] >= $result['stable']['req_per_min'],
+        'peak observation is retained separately from sustainable throughput',
+    );
     $assert(isset($result['multiple']['req_per_min_mad']), 'repeated-run RPM variance is recorded');
     $assert($result['configuration']['responseValidation'] === true, 'reproduction metadata is recorded');
     $assert(
@@ -303,7 +307,10 @@ namespace {
 
     $toMarkdownTable = new ReflectionMethod($perConfigRunner, 'toMarkdownTable');
     $markdown = $toMarkdownTable->invoke($perConfigRunner, $results);
-    $assert(str_contains($markdown, '## Ranking'), 'Markdown output has a concise ranking group');
+    $assert(
+        str_contains($markdown, '## Sustainable ranking'),
+        'Markdown output has a sustainable ranking group',
+    );
     $assert(
         str_contains($markdown, '## Throughput — concurrency 2')
         && str_contains($markdown, '## Throughput — concurrency 4'),
@@ -336,17 +343,27 @@ namespace {
         str_contains($markdown, 'Run 1 RPM') && str_contains($markdown, 'Run 3 RPM'),
         'per-run RPM remains visible',
     );
-    preg_match('/## Ranking\R\R(?<table>.*?)(?=\R\R## )/s', $markdown, $summaryMatch);
+    preg_match('/## Sustainable ranking\R\R(?<table>.*?)(?=\R\R## )/s', $markdown, $summaryMatch);
     $assert(
         !str_contains($summaryMatch['table'] ?? '', 'RPS')
         && !str_contains($summaryMatch['table'] ?? '', 'p99'),
         'ranking does not repeat detailed throughput or latency fields',
+    );
+    $assert(
+        str_contains($summaryMatch['table'] ?? '', 'Best stable RPM')
+        && str_contains($summaryMatch['table'] ?? '', 'Peak observed RPM'),
+        'ranking distinguishes sustainable throughput from an observed peak',
     );
 
     $groupData = ['slow' => $result, 'fast' => $result];
     $groupData['slow']['name'] = 'slow';
     $groupData['slow']['rank'] = 2;
     $groupData['slow']['score'] = 100.0;
+    $groupData['slow']['stable']['req_per_min'] = 100.0;
+    $groupData['slow']['stable']['concurrency'] = 2;
+    $groupData['slow']['peak']['req_per_min'] = 300.0;
+    $groupData['slow']['peak']['concurrency'] = 2;
+    $groupData['slow']['peak']['rpm_stability'] = 'unstable';
     $groupData['slow']['configuration']['url'] = 'http://slow.example.test';
     $groupData['slow']['throughputCurve'][2]['req_per_min'] = 300.0;
     $groupData['slow']['single']['p50'] = 0.04;
@@ -354,20 +371,38 @@ namespace {
     $groupData['fast']['name'] = 'fast';
     $groupData['fast']['rank'] = 1;
     $groupData['fast']['score'] = 200.0;
+    $groupData['fast']['stable']['req_per_min'] = 200.0;
+    $groupData['fast']['stable']['concurrency'] = 2;
+    $groupData['fast']['peak']['req_per_min'] = 200.0;
+    $groupData['fast']['peak']['concurrency'] = 2;
+    $groupData['fast']['peak']['rpm_stability'] = 'stable';
     $groupData['fast']['configuration']['url'] = 'http://fast.example.test';
     $groupData['fast']['throughputCurve'][2]['req_per_min'] = 200.0;
     $groupData['fast']['single']['p50'] = 0.02;
     $groupData['fast']['single']['error_rate'] = 0.1;
+    $groupData['unsteady'] = $result;
+    $groupData['unsteady']['name'] = 'unsteady';
+    $groupData['unsteady']['rank'] = null;
+    $groupData['unsteady']['score'] = null;
+    $groupData['unsteady']['stable'] = null;
+    $groupData['unsteady']['peak']['req_per_min'] = 400.0;
+    $groupData['unsteady']['peak']['concurrency'] = 4;
+    $groupData['unsteady']['peak']['rpm_stability'] = 'unstable';
+    $groupData['unsteady']['configuration']['url'] = 'http://unsteady.example.test';
     $groupConfiguration = new ReflectionMethod(BenchmarkRunner::class, 'groupConfiguration');
     [$commonConfiguration, $specificConfiguration] = $groupConfiguration->invoke(null, $groupData);
     $assert(isset($commonConfiguration['method']), 'identical configuration is grouped once');
     $assert(
-        isset($specificConfiguration['slow']['url'], $specificConfiguration['fast']['url']),
+        isset(
+            $specificConfiguration['slow']['url'],
+            $specificConfiguration['fast']['url'],
+            $specificConfiguration['unsteady']['url'],
+        ),
         'different target configuration remains per target',
     );
     $comparisonMarkdown = $toMarkdownTable->invoke($perConfigRunner, $groupData);
     $assert(
-        str_contains($comparisonMarkdown, '| Setting | fast | slow |'),
+        str_contains($comparisonMarkdown, '| Setting | fast | slow | unsteady |'),
         'target-specific configuration follows overall benchmark rank',
     );
     $assert(!str_contains($comparisonMarkdown, '| Recorded at |'), 'timestamps are not presented as configuration');
@@ -382,8 +417,25 @@ namespace {
     $appearsBefore = static fn(string $table, string $first, string $second): bool =>
         strpos($table, "| {$first} |") < strpos($table, "| {$second} |");
     $assert(
-        $appearsBefore($tableSection($comparisonMarkdown, 'Ranking'), 'fast', 'slow'),
-        'ranking rows are ordered by selected RPM descending',
+        $appearsBefore($tableSection($comparisonMarkdown, 'Sustainable ranking'), 'fast', 'slow')
+        && $appearsBefore($tableSection($comparisonMarkdown, 'Sustainable ranking'), 'slow', 'unsteady'),
+        'stable targets rank by sustainable RPM before targets with only unstable observations',
+    );
+    $assert(
+        str_contains(
+            $tableSection($comparisonMarkdown, 'Sustainable ranking'),
+            '| — | unsteady | — | — | 400 | 4 | Unstable |',
+        ),
+        'an unstable peak remains visible without receiving a sustainable rank',
+    );
+    $flatten = new ReflectionMethod($perConfigRunner, 'flatten');
+    [, $flatRows] = $flatten->invoke($perConfigRunner, $groupData);
+    $flatMetrics = array_column($flatRows, 0);
+    $assert(
+        in_array('stableRPM', $flatMetrics, true)
+        && in_array('peakObservedRPM', $flatMetrics, true)
+        && in_array('peakObservedStability', $flatMetrics, true),
+        'flat reports expose stable and observed-peak measurements explicitly',
     );
     $assert(
         $appearsBefore($tableSection($comparisonMarkdown, 'Throughput — concurrency 2'), 'slow', 'fast'),
@@ -435,6 +487,11 @@ namespace {
         $stableSelection['multiple']['concurrency'] === 2,
         'an unstable faster concurrency is excluded from selection',
     );
+    $assert(
+        $stableSelection['stable']['concurrency'] === 2
+        && $stableSelection['peak']['concurrency'] === 4,
+        'stable and peak concurrency measurements remain independently visible',
+    );
     foreach ([100.0, 200.0, 400.0] as $index => $rpm) {
         $stabilityRuns[$index]['concurrency'][2]['req_per_min'] = $rpm;
     }
@@ -448,9 +505,26 @@ namespace {
         1.0,
     );
     $assert(
-        $inconclusive['score'] === $inconclusive['multiple']['req_per_min']
+        $inconclusive['score'] === null
+        && $inconclusive['stable'] === null
+        && $inconclusive['peak'] === $inconclusive['multiple']
         && $inconclusive['rankingStatus'] === 'unstable',
-        'a target with no stable concurrency remains ranked with an unstable warning',
+        'a target with no stable concurrency keeps its observed peak without receiving a rank',
+    );
+    $unverified = $aggregateConfig->invoke(
+        $stabilityRunner,
+        'stability-test',
+        $resolvedConfig(['threads' => 4, 'name' => 'stability-test']),
+        [2, 4],
+        [$stabilityRuns[0]],
+        [],
+        1.0,
+    );
+    $assert(
+        $unverified['score'] === null
+        && $unverified['stable'] === null
+        && $unverified['rankingStatus'] === 'unverified',
+        'a one-repetition observation remains visible without being treated as stable',
     );
 
     $unit = UnitBenchmark::run(static function (): int {

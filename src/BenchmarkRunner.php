@@ -395,23 +395,30 @@ final class BenchmarkRunner
         }
 
         $selectedConcurrency = null;
+        $peakConcurrency = null;
         $minimumWindowFound = false;
         foreach ($levels as $level) {
             if ($throughputCurve[$level]['minimum_window_reached'] !== true) {
                 continue;
             }
             $minimumWindowFound = true;
-            if ($throughputCurve[$level]['rpm_stability'] === 'unstable') {
-                continue;
-            }
             if (
-                $selectedConcurrency === null
-                || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$selectedConcurrency]['req_per_min']
+                $peakConcurrency === null
+                || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$peakConcurrency]['req_per_min']
             ) {
-                $selectedConcurrency = $level;
+                $peakConcurrency = $level;
+            }
+
+            if ($throughputCurve[$level]['rpm_stability'] === 'stable') {
+                if (
+                    $selectedConcurrency === null
+                    || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$selectedConcurrency]['req_per_min']
+                ) {
+                    $selectedConcurrency = $level;
+                }
             }
         }
-        if (!$minimumWindowFound) {
+        if (!$minimumWindowFound || $peakConcurrency === null) {
             throw new RuntimeException(sprintf(
                 'No concurrency phase for %s reached the %.2f second minimum before the request safety limit',
                 $name,
@@ -421,23 +428,13 @@ final class BenchmarkRunner
 
         $rankingStatus = 'stable';
         if ($selectedConcurrency === null) {
-            $rankingStatus = 'unstable';
-            foreach ($levels as $level) {
-                if (
-                    $throughputCurve[$level]['minimum_window_reached'] === true
-                    && (
-                        $selectedConcurrency === null
-                        || $throughputCurve[$level]['req_per_min'] > $throughputCurve[$selectedConcurrency]['req_per_min']
-                    )
-                ) {
-                    $selectedConcurrency = $level;
-                }
-            }
-        } elseif ($throughputCurve[$selectedConcurrency]['rpm_stability'] === 'unverified') {
-            $rankingStatus = 'unverified';
+            $rankingStatus = $throughputCurve[$peakConcurrency]['rpm_stability'];
+            $selectedConcurrency = $peakConcurrency;
         }
 
         $multiple = $throughputCurve[$selectedConcurrency];
+        $peak = $throughputCurve[$peakConcurrency];
+        $stable = $rankingStatus === 'stable' ? $multiple : null;
         $safeWarmUp = in_array($config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)
             ? $this->warmUpRequests
             : 0;
@@ -445,6 +442,8 @@ final class BenchmarkRunner
             'name' => $name,
             'single' => self::medianMetrics($singleMeasurements, $this->maximumRpmSpreadPercent),
             'multiple' => $multiple,
+            'stable' => $stable,
+            'peak' => $peak,
             'throughputCurve' => $throughputCurve,
             'runs' => $runs,
             'totalDuration' => round($totalDuration, 5),
@@ -454,7 +453,7 @@ final class BenchmarkRunner
             'container' => self::combineContainerStats($containerStats),
             'configuration' => $this->configurationMetadata($config, $levels, $safeWarmUp),
             'rankingStatus' => $rankingStatus,
-            'score' => (float) $multiple['req_per_min'],
+            'score' => $stable === null ? null : (float) $stable['req_per_min'],
         ];
     }
 
@@ -842,13 +841,16 @@ final class BenchmarkRunner
         $curveRows = [];
         $resourceRows = [];
         foreach ($data as $name => $result) {
-            $multiple = $result['multiple'];
+            $stable = $result['stable'];
+            $peak = $result['peak'];
             $summaryRows[] = [
                 $result['rank'],
                 $name,
-                self::displayNumber($result['score'], 0),
-                $multiple['concurrency'],
-                ucfirst($result['rankingStatus']),
+                self::displayNumber($stable['req_per_min'] ?? null, 0),
+                $stable['concurrency'] ?? null,
+                self::displayNumber($peak['req_per_min'], 0),
+                $peak['concurrency'],
+                ucfirst($peak['rpm_stability']),
                 self::displayNumber($result['totalDuration'], 1),
             ];
 
@@ -946,8 +948,17 @@ final class BenchmarkRunner
         }
 
         $sections = [
-            self::markdownTable('Ranking',
-                ['Rank', 'Target', 'Selected RPM', 'Selected concurrency', 'Status', 'Duration s'],
+            self::markdownTable('Sustainable ranking',
+                [
+                    'Rank',
+                    'Target',
+                    'Best stable RPM',
+                    'Stable concurrency',
+                    'Peak observed RPM',
+                    'Peak concurrency',
+                    'Peak stability',
+                    'Duration s',
+                ],
                 $summaryRows,
             ),
         ];
@@ -1041,7 +1052,8 @@ final class BenchmarkRunner
     {
         if ($left['score'] === null) {
             return $right['score'] === null
-                ? strcmp((string) $left['name'], (string) $right['name'])
+                ? (((float) $right['peak']['req_per_min'] <=> (float) $left['peak']['req_per_min'])
+                    ?: strcmp((string) $left['name'], (string) $right['name']))
                 : 1;
         }
         if ($right['score'] === null) {
@@ -1229,7 +1241,11 @@ final class BenchmarkRunner
         foreach ($data as $name => $result) {
             $metrics = [
                 'rank' => $result['rank'],
-                'validatedRPM' => $result['score'],
+                'stableRPM' => $result['stable']['req_per_min'] ?? null,
+                'stableConcurrency' => $result['stable']['concurrency'] ?? null,
+                'peakObservedRPM' => $result['peak']['req_per_min'],
+                'peakObservedConcurrency' => $result['peak']['concurrency'],
+                'peakObservedStability' => $result['peak']['rpm_stability'],
                 'totalDuration' => $result['totalDuration'],
                 'remoteMemoryMB' => $result['remoteMemoryMB'],
             ];
