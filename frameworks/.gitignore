@@ -1,0 +1,22 @@
+# Framework applications are generated locally by Composer. Keep only the
+# benchmark suite definitions and shared infrastructure under version control.
+/*
+!/.gitignore
+!/config
+
+!/*/
+/*/*
+
+# Shared benchmark infrastructure is maintained by this repository.
+!/.docker/
+!/.docker/**
+!/_support/
+!/_support/**
+!/libs/
+!/libs/**
+
+# A target wrapper owns only its ignore sentinel and benchmark definition;
+# Composer installs the framework itself under the ignored asset directory.
+!/*/.gitignore
+!/*/_benchmark/
+!/*/_benchmark/**

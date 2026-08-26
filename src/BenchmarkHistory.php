@@ -153,6 +153,7 @@ final class BenchmarkHistory
         $directory = $this->resolveDirectory($identifier);
         $file = $directory . '/dashboard.html';
         $this->write($file, BenchmarkDashboard::render($this->load($identifier)));
+        $this->writeIndex();
 
         return $file;
     }
@@ -189,19 +190,33 @@ final class BenchmarkHistory
     {
         $this->ensureRoot();
         $items = '';
-        foreach ($this->entries() as $entry) {
+        foreach ($this->entries() as $position => $entry) {
             $id = htmlspecialchars($entry['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
             $date = htmlspecialchars($entry['recordedAt'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $items .= "<li><a href=\"{$id}/dashboard.html\">{$date}</a>"
-                . " <span>{$entry['targets']} targets</span></li>\n";
+            $latest = $position === 0 ? '<span class="badge text-bg-primary">Latest</span>' : '';
+            $items .= "<a class=\"run-card text-decoration-none\" href=\"{$id}/dashboard.html\">"
+                . "<span><strong>{$date}</strong><small>{$id}</small></span>"
+                . "<span class=\"run-meta\">{$latest}<span>{$entry['targets']} targets</span><b aria-hidden=\"true\">→</b></span>"
+                . "</a>\n";
         }
         if ($items === '') {
-            $items = '<li>No benchmark runs archived.</li>';
+            $items = '<div class="empty">No benchmark runs have been archived yet.</div>';
         }
-        $html = "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\">"
-            . "<title>Benchmark history</title><style>body{max-width:900px;margin:40px auto;padding:0 20px;background:#08111f;color:#e7eef9;font:16px system-ui}"
-            . "a{color:#38bdf8}li{padding:12px;border-bottom:1px solid #263750;display:flex;justify-content:space-between}</style>"
-            . "<h1>Benchmark history</h1><ol>{$items}</ol>";
+        $html = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            . "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            . "<title>PHP framework benchmark history</title>"
+            . "<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css\" rel=\"stylesheet\" "
+            . "integrity=\"sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB\" crossorigin=\"anonymous\">"
+            . "<style>:root{--page:#f4f7fb;--surface:#fff;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6}"
+            . "*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 0,rgba(91,91,214,.15),transparent 32rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}"
+            . ".shell{width:min(920px,calc(100% - 32px));margin:auto;padding:58px 0}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}"
+            . "h1{margin:7px 0 8px;font-size:clamp(30px,6vw,48px);letter-spacing:-.04em}.lead{margin:0 0 28px;color:var(--muted)}.runs{display:grid;gap:11px}"
+            . ".run-card{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 19px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 12px 34px rgba(30,41,59,.07);transition:.18s ease}"
+            . ".run-card:hover{border-color:var(--primary);color:var(--primary);transform:translateY(-2px);box-shadow:0 18px 42px rgba(30,41,59,.12)}.run-card small{display:block;margin-top:3px;color:var(--muted);font-family:ui-monospace,monospace}"
+            . ".run-meta{display:flex;align-items:center;gap:12px;white-space:nowrap;color:var(--muted)}.run-meta b{color:var(--primary);font-size:20px}.empty{padding:32px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);background:var(--surface)}"
+            . "@media(max-width:560px){.shell{padding-top:34px}.run-card{align-items:flex-start;flex-direction:column}.run-meta{width:100%;justify-content:space-between}}</style></head>"
+            . "<body><main class=\"shell\"><div class=\"eyebrow\">Benchmark archive</div><h1>PHP framework performance</h1>"
+            . "<p class=\"lead\">Weekly, reproducible reports generated with validated HTTP responses.</p><div class=\"runs\">{$items}</div></main></body></html>";
         $this->write(rtrim($this->root, '/') . '/index.html', $html);
     }
 

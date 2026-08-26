@@ -46,6 +46,12 @@ The repository includes its own framework suite under `frameworks/`; the sibling
 `setup` and `update` recreate targets from the newest stable Composer project
 release compatible with the current PHP runtime.
 
+Each `frameworks/<target>/` directory is a benchmark-owned wrapper. Composer
+installs the framework application into its ignored `asset/` directory, while
+`.gitignore` and `_benchmark/` remain at the wrapper root. The generated
+framework therefore keeps its own `.gitignore` inside `asset/` without replacing
+or affecting the benchmark definition.
+
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
 `infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`,
 `pure-php`, `slim`, `symfony`, and `yii-basic`. The API target remains separate
@@ -131,14 +137,17 @@ Framework folders are not auto-discovered. A target must be listed in
 which targets run and in what order.
 
 Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
-as canonical `results.json`, `report.md`, and a dependency-free
+as canonical `results.json`, `report.md`, and an interactive Bootstrap 5.3.8
 `dashboard.html`. The history root also gets an `index.html` linking all runs.
 Pass `--no-archive` to disable files.
 
-The `Framework benchmarks` GitHub Actions workflow runs weekly, on pushes to
-`main`, or manually. It commits reports to `docs/` and deploys that folder to
-GitHub Pages. Set the repository's Pages source to **GitHub Actions** once before
-the first deployment.
+The `Framework benchmarks` GitHub Actions workflow runs weekly, after non-docs
+changes land on `main`, or manually. It opens or updates a pull request containing
+the generated `docs/` reports instead of committing directly to `main`. After the
+results PR is reviewed and merged, the separate `Benchmark Pages` workflow
+deploys `docs/` to GitHub Pages. Set the repository's Pages source to **GitHub
+Actions** and enable **Allow GitHub Actions to create and approve pull requests**
+in the repository Actions settings.
 
 ### Framework lifecycle and runtime preparation
 

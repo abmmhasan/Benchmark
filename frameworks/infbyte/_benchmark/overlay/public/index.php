@@ -29,7 +29,7 @@ $request = Request::fromGlobals();
 $response = $app->handle($request);
 
 ob_start();
-require dirname(__DIR__, 2) . '/libs/output_data.php';
+require dirname(__DIR__, 3) . '/libs/output_data.php';
 $benchmarkData = ob_get_clean();
 
 $response = Response::create(
@@ -39,4 +39,3 @@ $response = Response::create(
 );
 
 new AutoEmitter()->emit($response, $request);
-

@@ -29,4 +29,4 @@ $app->run();
 
 
 /* *** PHP-Frameworks-Bench *** */
-require dirname(__DIR__, 2) . '/libs/output_data.php';
+require dirname(__DIR__, 3) . '/libs/output_data.php';

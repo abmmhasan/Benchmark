@@ -752,11 +752,12 @@ namespace {
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
     $assert(
         $bundledSuite->configs(['symfony'])[0]->getUrl()
-            === 'http://127.0.0.1:8080/frameworks/symfony/public/index.php/hello/index',
+            === 'http://127.0.0.1:8080/frameworks/symfony/asset/public/index.php/hello/index',
         'bundled suite URL is generated from its internal config',
     );
     $allLifecycleScriptsExist = true;
     $allGeneratedFilesAreIgnored = true;
+    $allTargetsUseAssetDirectory = true;
     foreach ($bundledTargets as $target) {
         foreach (['setup', 'update', 'clean', 'clear-cache', 'hello_world'] as $action) {
             $allLifecycleScriptsExist = $allLifecycleScriptsExist
@@ -765,27 +766,53 @@ namespace {
         $ignore = file_get_contents("{$bundledSuiteDirectory}/{$target}/.gitignore");
         $allGeneratedFilesAreIgnored = $allGeneratedFilesAreIgnored
             && is_string($ignore)
-            && str_contains($ignore, "*\n")
-            && str_contains($ignore, "!_benchmark/**");
+            && str_contains($ignore, "/asset/\n")
+            && str_contains($ignore, "/.benchmark-create-project/\n");
+        $helloWorld = file_get_contents("{$bundledSuiteDirectory}/{$target}/_benchmark/hello_world.sh");
+        $allTargetsUseAssetDirectory = $allTargetsUseAssetDirectory
+            && is_string($helloWorld)
+            && str_contains($helloWorld, '$base/$fw/asset/');
     }
     $assert($allLifecycleScriptsExist, 'every bundled target provides the complete lifecycle script set');
     $assert($allGeneratedFilesAreIgnored, 'every bundled target ignores generated create-project files');
+    $assert($allTargetsUseAssetDirectory, 'every bundled target serves its generated application from asset');
+    $frameworkIgnore = file_get_contents($bundledSuiteDirectory . '/.gitignore');
+    $assert(
+        is_string($frameworkIgnore)
+        && str_contains($frameworkIgnore, "/*/*\n")
+        && str_contains($frameworkIgnore, "!/*/_benchmark/**\n")
+        && str_contains($frameworkIgnore, "!/_support/**\n")
+        && str_contains($frameworkIgnore, "!/libs/**\n"),
+        'framework root ignores generated files for new targets while retaining suite infrastructure',
+    );
     $lifecycleSource = file_get_contents($bundledSuiteDirectory . '/_support/lifecycle.sh');
     $assert(
         is_string($lifecycleSource)
         && str_contains($lifecycleSource, 'composer create-project')
+        && str_contains($lifecycleSource, 'cp -a "$build_dir/." "$asset_dir/"')
+        && !str_contains($lifecycleSource, 'rm -f -- "$build_dir/.gitignore"')
         && preg_match('/create-project[^\n]*:[0-9]/', $lifecycleSource) !== 1,
-        'Composer project creation does not pass a framework version constraint',
+        'Composer project creation installs unversioned assets and preserves framework ignore rules',
     );
     $assert(
         is_string($lifecycleSource)
         && str_contains($lifecycleSource, 'SESSION_DRIVER array')
-        && str_contains($lifecycleSource, 'chmod a+r "$target_dir/.env"'),
+        && str_contains($lifecycleSource, 'chmod a+r "$asset_dir/.env"'),
         'generated web fixtures receive readable production-safe runtime configuration',
     );
     $assert(
         is_file($bundledSuiteDirectory . '/cakephp/_benchmark/overlay/.htaccess'),
         'CakePHP setup disables the scaffold rewrite that loops on direct front-controller URLs',
+    );
+    $flightFrontController = file_get_contents(
+        $bundledSuiteDirectory . '/flight/_benchmark/overlay/public/index.php',
+    );
+    $assert(
+        is_string($flightFrontController)
+        && str_contains($flightFrontController, 'new Engine()')
+        && str_contains($flightFrontController, "->router()->get('/index.php/hello/index'")
+        && !str_contains($flightFrontController, 'app/config/bootstrap.php'),
+        'Flight benchmark uses a minimal framework boot without skeleton session overhead',
     );
 
     $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));
@@ -816,9 +843,14 @@ namespace {
     $dashboard = file_get_contents($history->dashboard(0));
     $assert(
         is_string($dashboard)
-        && str_contains($dashboard, 'Peak observed requests/minute')
+        && str_contains($dashboard, 'bootstrap@5.3.8')
+        && str_contains($dashboard, 'Higher is better · best first')
+        && str_contains($dashboard, 'Lower is better · best first')
+        && str_contains($dashboard, 'Concurrency curves')
+        && str_contains($dashboard, 'All concurrency measurements')
+        && str_contains($dashboard, 'data-sortable')
         && str_contains($dashboard, 'server_execution_ms'),
-        'browser dashboard includes throughput and server telemetry',
+        'browser dashboard includes Bootstrap, sorted guidance, concurrency detail, and sortable data',
     );
     $expectException(
         RuntimeException::class,

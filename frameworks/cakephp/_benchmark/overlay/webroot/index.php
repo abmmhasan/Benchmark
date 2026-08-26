@@ -41,4 +41,4 @@ $server->emit($server->run());
 // for php-fpm:
 // comment this line and uncomment it in HelloWorldController.php
 // make sure to run sudo bash disable-fastcgi.sh
-require dirname(__DIR__, 2) . '/libs/output_data.php';
+require dirname(__DIR__, 3) . '/libs/output_data.php';

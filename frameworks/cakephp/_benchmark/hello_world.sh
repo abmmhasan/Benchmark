@@ -1,2 +1,2 @@
 #!/usr/bin/env sh
-url="$base/$fw/webroot/index.php/hello/index"
+url="$base/$fw/asset/webroot/index.php/hello/index"

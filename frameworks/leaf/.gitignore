@@ -1,4 +1,2 @@
-*
-!.gitignore
-!_benchmark/
-!_benchmark/**
+/asset/
+/.benchmark-create-project/

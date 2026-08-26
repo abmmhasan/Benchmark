@@ -106,4 +106,4 @@ $url = $_SERVER['PATH_INFO'] ?? '/';
  */
 //require APP_PATH . 'libs/bootstrap.php'; //bootstrap de app
 require CORE_PATH.'kumbia/bootstrap.php'; //bootstrap del core
-require dirname(__DIR__, 3) . '/libs/output_data.php';
+require dirname(__DIR__, 4) . '/libs/output_data.php';
