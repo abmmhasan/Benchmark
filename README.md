@@ -62,7 +62,7 @@ route.
 
 Omitting `--target` selects every framework listed in `frameworks/config`.
 
-#### Generate and view results
+#### Generate
 
 ```bash
 # Create every framework application from its latest compatible release.
@@ -76,13 +76,17 @@ composer benchmark:frameworks -- check
 
 # Benchmark every configured framework.
 composer benchmark:frameworks -- run
+```
 
+#### View results
+
+```bash
 # List archived runs and regenerate the newest visual dashboard.
 composer benchmark:frameworks -- list
 composer benchmark:frameworks -- dashboard --run=0
 ```
 
-#### Clean up generated applications
+#### Clean
 
 ```bash
 # Remove every generated application while preserving benchmark scripts.
