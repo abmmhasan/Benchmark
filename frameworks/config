@@ -1,5 +1,6 @@
-# Base URL used when --base-url is not supplied.
-base="http://127.0.0.1/frameworks"
+# Manual-server fallback only. Docker records its automatically allocated URL
+# in .benchmark-server.json, which takes precedence over this value.
+base="http://127.0.0.1:8080/frameworks"
 
 # Suggested benchmark defaults.
 duration=30

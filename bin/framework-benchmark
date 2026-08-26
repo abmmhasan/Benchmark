@@ -30,6 +30,7 @@ Commands:
   reset-opcache       Reset the web server's OPCache through the fixture endpoint
   disable-fastcgi     Add fastcgi_finish_request to disable_functions; requires --force
   docker              Build and start the suite's Apache container
+  docker-stop         Stop and remove the suite's Apache container
   list                List archived benchmark runs, newest first
   compare             Compare --current with --baseline
   dashboard           Regenerate and print the dashboard path for --run
@@ -68,7 +69,7 @@ History options:
   --baseline=ID         Baseline run for comparison (default: 1)
 
 Docker options:
-  --port=N              Apache port (default: 8080)
+  --port=N              Fixed Apache port; omitted chooses a free port automatically
   --name=NAME           Container name (default: benchmark-frameworks-apache)
 TEXT;
 
@@ -233,7 +234,7 @@ if ($command === 'help' || flag($options, 'help')) {
 
 $knownCommands = [
     'run', 'doctor', 'check', 'setup', 'update', 'clean', 'clear-cache', 'restart',
-    'reset-opcache', 'disable-fastcgi', 'docker', 'list', 'compare', 'dashboard',
+    'reset-opcache', 'disable-fastcgi', 'docker', 'docker-stop', 'list', 'compare', 'dashboard',
     'delete', 'delete-all',
 ];
 if (!in_array($command, $knownCommands, true)) {
@@ -349,12 +350,24 @@ try {
     }
 
     if ($command === 'docker') {
+        $requestedPort = stringOption($options, 'port') === null
+            ? null
+            : integerOption($options, 'port', 1, 1, 65_535);
         printOperations($manager->dockerApache(
-            integerOption($options, 'port', 8080, 1, 65_535),
+            $requestedPort,
             (string) stringOption($options, 'name', 'benchmark-frameworks-apache'),
             $dryRun,
             $stream,
         ));
+        exit(0);
+    }
+
+    if ($command === 'docker-stop') {
+        printOperations([$manager->stopDockerApache(
+            stringOption($options, 'name'),
+            $dryRun,
+            $stream,
+        )]);
         exit(0);
     }
 

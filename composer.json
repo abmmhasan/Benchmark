@@ -42,8 +42,10 @@
       "@lint:frameworks"
     ],
     "lint:frameworks": [
-      "find frameworks -type f -name '*.php' -exec php -l {} \\;",
-      "find frameworks -type f -name '*.sh' -exec bash -n {} \\;"
+      "find frameworks/libs -type f -name '*.php' -exec php -l {} \\;",
+      "find frameworks -path '*/_benchmark/*' -type f -name '*.php' -exec php -l {} \\;",
+      "find frameworks -path '*/_benchmark/*' -type f -name '*.sh' -exec bash -n {} \\;",
+      "bash -n frameworks/_support/lifecycle.sh"
     ],
     "test": "@php tests/run.php",
     "bench": "phpbench run --report=aggregate",

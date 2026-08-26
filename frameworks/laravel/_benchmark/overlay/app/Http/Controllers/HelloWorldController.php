@@ -6,11 +6,11 @@
 namespace App\Http\Controllers;
 
 class HelloWorldController extends Controller {
-    public function index(): void {
-        echo 'Hello World!';
-        // uncomment this line for php-fpm
-        // require $_SERVER['DOCUMENT_ROOT'].'/PHP-Frameworks-Bench/libs/output_data.php';
+    public function index() {
+        ob_start();
+        require dirname(__DIR__, 4) . '/libs/output_data.php';
+        $telemetry = ob_get_clean();
+
+        return response('Hello World!' . (is_string($telemetry) ? $telemetry : ''));
     }
 }
-
-?>

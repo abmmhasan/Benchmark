@@ -634,6 +634,16 @@ namespace {
         $assert($frameworkSuite->targets() === ['alpha', 'beta'], 'framework targets follow suite config order');
         $assert($frameworkSuite->getSuggestedConcurrency() === 42, 'suite connection default is imported');
         $assert($frameworkSuite->getSuggestedDuration() === 17, 'suite duration default is imported');
+        file_put_contents(
+            $suiteDirectory . '/.benchmark-server.json',
+            json_encode(['baseUrl' => 'http://127.0.0.1:43210/bench'], JSON_THROW_ON_ERROR),
+        );
+        $runtimeSuite = new PhpFrameworksBenchSuite($suiteDirectory);
+        $assert(
+            $runtimeSuite->getBaseUrl() === 'http://127.0.0.1:43210/bench',
+            'recorded benchmark server URL overrides the static suite fallback',
+        );
+        unlink($suiteDirectory . '/.benchmark-server.json');
         $suiteConfigs = $frameworkSuite->configs(['beta']);
         $assert(count($suiteConfigs) === 1, 'framework target selection is supported');
         $assert(
@@ -697,8 +707,22 @@ namespace {
         $dockerPlan = $frameworkManager->dockerApache(dryRun: true);
         $assert(
             $dockerPlan[0]['command'][0] === 'docker'
-            && $dockerPlan[1]['status'] === 'dry-run',
-            'Docker Apache build and run commands support dry-run',
+            && $dockerPlan[1]['status'] === 'dry-run'
+            && in_array('127.0.0.1::80', $dockerPlan[1]['command'], true)
+            && $dockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-apache', '80/tcp']
+            && !is_file($suiteDirectory . '/.benchmark-server.json'),
+            'Docker Apache lets Docker allocate a loopback port and supports dry-run',
+        );
+        $fixedDockerPlan = $frameworkManager->dockerApache(port: 18_080, dryRun: true);
+        $assert(
+            in_array('127.0.0.1:18080:80', $fixedDockerPlan[1]['command'], true),
+            'Docker Apache supports an explicitly requested loopback port',
+        );
+        $dockerStopPlan = $frameworkManager->stopDockerApache(dryRun: true);
+        $assert(
+            $dockerStopPlan['command'] === ['docker', 'stop', 'benchmark-frameworks-apache']
+            && $dockerStopPlan['status'] === 'dry-run',
+            'Docker Apache stop command supports dry-run',
         );
     } finally {
         unlink($suiteDirectory . '/alpha/_benchmark/setup.sh');
@@ -716,7 +740,10 @@ namespace {
     }
 
     $bundledSuiteDirectory = dirname(__DIR__) . '/frameworks';
-    $bundledSuite = new PhpFrameworksBenchSuite($bundledSuiteDirectory);
+    $bundledSuite = new PhpFrameworksBenchSuite(
+        $bundledSuiteDirectory,
+        'http://127.0.0.1:8080/frameworks',
+    );
     $bundledTargets = [
         'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'lumen', 'nette', 'pure-php', 'slim', 'symfony',
@@ -725,7 +752,7 @@ namespace {
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
     $assert(
         $bundledSuite->configs(['symfony'])[0]->getUrl()
-            === 'http://127.0.0.1/frameworks/symfony/public/index.php/hello/index',
+            === 'http://127.0.0.1:8080/frameworks/symfony/public/index.php/hello/index',
         'bundled suite URL is generated from its internal config',
     );
     $allLifecycleScriptsExist = true;
@@ -749,6 +776,16 @@ namespace {
         && str_contains($lifecycleSource, 'composer create-project')
         && preg_match('/create-project[^\n]*:[0-9]/', $lifecycleSource) !== 1,
         'Composer project creation does not pass a framework version constraint',
+    );
+    $assert(
+        is_string($lifecycleSource)
+        && str_contains($lifecycleSource, 'SESSION_DRIVER array')
+        && str_contains($lifecycleSource, 'chmod a+r "$target_dir/.env"'),
+        'generated web fixtures receive readable production-safe runtime configuration',
+    );
+    $assert(
+        is_file($bundledSuiteDirectory . '/cakephp/_benchmark/overlay/.htaccess'),
+        'CakePHP setup disables the scaffold rewrite that loops on direct front-controller URLs',
     );
 
     $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));

@@ -28,7 +28,9 @@ final class PhpFrameworksBenchSuite
             throw new InvalidArgumentException("Framework suite config was not found: {$configFile}");
         }
 
-        $resolvedBaseUrl = $baseUrl ?? self::shellConfigValue($config, 'base');
+        $resolvedBaseUrl = $baseUrl
+            ?? self::runtimeBaseUrl($resolvedDirectory)
+            ?? self::shellConfigValue($config, 'base');
         if ($resolvedBaseUrl === null || filter_var($resolvedBaseUrl, FILTER_VALIDATE_URL) === false) {
             throw new InvalidArgumentException('A valid base URL is required for the framework suite');
         }
@@ -246,6 +248,31 @@ final class PhpFrameworksBenchSuite
         }
 
         return null;
+    }
+
+    private static function runtimeBaseUrl(string $projectDirectory): ?string
+    {
+        $file = $projectDirectory . '/.benchmark-server.json';
+        if (!is_file($file)) {
+            return null;
+        }
+
+        $contents = file_get_contents($file);
+        if (!is_string($contents)) {
+            return null;
+        }
+
+        try {
+            $runtime = json_decode($contents, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+
+        $runtimeUrl = is_array($runtime) ? ($runtime['baseUrl'] ?? null) : null;
+
+        return is_string($runtimeUrl) && filter_var($runtimeUrl, FILTER_VALIDATE_URL) !== false
+            ? $runtimeUrl
+            : null;
     }
 
     private static function shellConfigInteger(string $config, string $name): ?int

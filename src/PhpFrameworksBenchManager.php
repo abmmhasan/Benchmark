@@ -322,12 +322,12 @@ final class PhpFrameworksBenchManager
      * @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}>
      */
     public function dockerApache(
-        int $port = 8080,
+        ?int $port = null,
         string $name = 'benchmark-frameworks-apache',
         bool $dryRun = false,
         ?callable $output = null,
     ): array {
-        if ($port < 1 || $port > 65_535) {
+        if ($port !== null && ($port < 1 || $port > 65_535)) {
             throw new InvalidArgumentException('Docker port must be between 1 and 65535');
         }
         if (preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/', $name) !== 1) {
@@ -337,17 +337,21 @@ final class PhpFrameworksBenchManager
         if (!is_file($dockerfile)) {
             throw new RuntimeException("Dockerfile not found: {$dockerfile}");
         }
+        $publishedPort = $port === null
+            ? '127.0.0.1::80'
+            : "127.0.0.1:{$port}:80";
         $commands = [
             [
                 'docker', 'build', '--tag', 'benchmark/php-frameworks-apache',
                 '--file', $dockerfile, $this->suite->getProjectDirectory(),
             ],
             [
-                'docker', 'run', '--detach', '--rm', '--name', $name, '--network', 'host',
-                '--env', "PORT={$port}",
+                'docker', 'run', '--detach', '--rm', '--name', $name,
+                '--publish', $publishedPort,
                 '--volume', $this->suite->getProjectDirectory() . ':/var/www/html/frameworks:rw',
                 'benchmark/php-frameworks-apache:latest',
             ],
+            ['docker', 'port', $name, '80/tcp'],
         ];
 
         $results = [];
@@ -371,7 +375,87 @@ final class PhpFrameworksBenchManager
             }
         }
 
+        if (!$dryRun) {
+            $portOutput = $results[2]['stdout'] ?? '';
+            if (!is_string($portOutput)
+                || preg_match('/127\.0\.0\.1:(?<port>\d+)\s*$/', trim($portOutput), $match) !== 1
+            ) {
+                throw new RuntimeException('Docker started, but its allocated loopback port could not be determined');
+            }
+            $port = (int) $match['port'];
+            $runtime = json_encode([
+                'baseUrl' => "http://127.0.0.1:{$port}/frameworks",
+                'host' => '127.0.0.1',
+                'port' => $port,
+                'container' => $name,
+                'startedAt' => gmdate(DATE_ATOM),
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            if (file_put_contents($this->runtimeFile(), $runtime . PHP_EOL, LOCK_EX) === false) {
+                throw new RuntimeException('Docker started, but its runtime URL could not be recorded');
+            }
+        }
+
         return $results;
+    }
+
+    /** @return array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string} */
+    public function stopDockerApache(
+        ?string $name = null,
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        $runtime = $this->readRuntime();
+        $name ??= is_string($runtime['container'] ?? null)
+            ? $runtime['container']
+            : 'benchmark-frameworks-apache';
+        if (preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/', $name) !== 1) {
+            throw new InvalidArgumentException('Invalid Docker container name');
+        }
+
+        $command = ['docker', 'stop', $name];
+        if ($dryRun) {
+            return [
+                'command' => $command,
+                'cwd' => $this->suite->getProjectDirectory(),
+                'status' => 'dry-run',
+            ];
+        }
+
+        $result = self::runProcess($command, $this->suite->getProjectDirectory(), $output);
+        if ($result['exitCode'] !== 0) {
+            throw new RuntimeException('Unable to stop Docker benchmark server: ' . trim($result['stderr']));
+        }
+        if (is_file($this->runtimeFile()) && !unlink($this->runtimeFile())) {
+            throw new RuntimeException('Docker stopped, but its runtime URL could not be removed');
+        }
+
+        return [
+            'command' => $command,
+            'cwd' => $this->suite->getProjectDirectory(),
+            'status' => 'completed',
+        ] + $result;
+    }
+
+    private function runtimeFile(): string
+    {
+        return $this->suite->getProjectDirectory() . '/.benchmark-server.json';
+    }
+
+    /** @return array<string, mixed> */
+    private function readRuntime(): array
+    {
+        $contents = is_file($this->runtimeFile()) ? file_get_contents($this->runtimeFile()) : false;
+        if (!is_string($contents)) {
+            return [];
+        }
+
+        try {
+            $runtime = json_decode($contents, true, 16, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return [];
+        }
+
+        return is_array($runtime) ? $runtime : [];
     }
 
     /**

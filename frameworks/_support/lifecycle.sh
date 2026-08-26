@@ -63,6 +63,19 @@ apply_overlay() {
     fi
 }
 
+set_env_value() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    [[ -f "$file" ]] || return 0
+
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        printf '\n%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
 setup_project() {
     clean_generated
 
@@ -104,6 +117,9 @@ setup_project() {
             ;;
         infbyte)
             rm -f -- "$target_dir/public/.htaccess"
+            set_env_value "$target_dir/.env" APP_ENV production
+            set_env_value "$target_dir/.env" APP_DEBUG false
+            chmod a+r "$target_dir/.env"
             php "$target_dir/infbyte" optimize
             chmod -R a+rwX "$target_dir/bootstrap/cache" "$target_dir/storage"
             ;;
@@ -112,6 +128,12 @@ setup_project() {
             ;;
         laravel|laravel-api)
             rm -f -- "$target_dir/public/.htaccess"
+            set_env_value "$target_dir/.env" APP_ENV production
+            set_env_value "$target_dir/.env" APP_DEBUG false
+            set_env_value "$target_dir/.env" SESSION_DRIVER array
+            set_env_value "$target_dir/.env" CACHE_STORE array
+            set_env_value "$target_dir/.env" QUEUE_CONNECTION sync
+            chmod a+r "$target_dir/.env"
             php "$target_dir/artisan" optimize
             chmod -R a+rwX "$target_dir/bootstrap/cache" "$target_dir/storage"
             ;;

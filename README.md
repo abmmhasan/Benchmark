@@ -41,16 +41,10 @@ echo $results;
 ## Self-contained framework benchmarks
 
 The repository includes its own framework suite under `frameworks/`; the sibling
-`PHP-Frameworks-Bench` checkout is no longer required. Targets use stable,
-unversioned names. Each target keeps only its lifecycle scripts and benchmark
-route overlay in Git. The application produced by Composer—including its lock
-file, dependencies, environment files, and framework sources—is ignored.
+`PHP-Frameworks-Bench` checkout is no longer required.
 
-`setup` invokes `composer create-project` without a package version argument, so
-Composer selects the newest stable project release compatible with the current
-PHP runtime. `update` deliberately performs the same clean recreation, allowing
-it to cross framework major versions rather than remaining constrained by the
-generated project's old `composer.json`.
+`setup` and `update` recreate targets from the newest stable Composer project
+release compatible with the current PHP runtime.
 
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
 `infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`,
@@ -71,6 +65,9 @@ composer benchmark:frameworks -- setup --force
 # Later, recreate every application from the latest compatible release.
 composer benchmark:frameworks -- update --force
 
+# Start the bundled Apache server on an automatically selected free port.
+composer benchmark:frameworks -- docker
+
 # Validate every endpoint before measurement.
 composer benchmark:frameworks -- check
 
@@ -89,6 +86,9 @@ composer benchmark:frameworks -- dashboard --run=0
 #### Clean
 
 ```bash
+# Stop and remove the bundled benchmark server.
+composer benchmark:frameworks -- docker-stop
+
 # Remove every generated application while preserving benchmark scripts.
 composer benchmark:frameworks -- clean --force
 ```
@@ -123,6 +123,11 @@ The suite base URL, duration, connection count, and unversioned target list are
 defined in `frameworks/config`. Use `--suite` only to exercise a compatible
 external suite. `connections` maps to this runner's maximum
 concurrency for the built-in PHP load generator.
+
+Framework folders are not auto-discovered. A target must be listed in
+`frameworks/config` and provide `_benchmark/hello_world.sh`; the config controls
+which targets run and in what order.
+
 Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
 as canonical `results.json`, `report.md`, and a dependency-free
 `dashboard.html`. The history root also gets an `index.html` linking all runs.
@@ -130,9 +135,6 @@ Pass `--no-archive` to disable files.
 
 ### Framework lifecycle and runtime preparation
 
-Every target has `setup.sh`, `update.sh`, `clean.sh`, `clear-cache.sh`, and
-`hello_world.sh` under its `_benchmark` folder. These small wrappers call the
-bounded shared lifecycle implementation and apply that target's tracked overlay.
 Use `--target` to limit scope. Setup, update, and cleanup replace generated files
 and therefore require `--force`; every command supports `--dry-run`:
 
@@ -167,15 +169,21 @@ composer benchmark:frameworks -- restart --service=nginx,php-fpm --dry-run
 composer benchmark:frameworks -- reset-opcache
 composer benchmark:frameworks -- disable-fastcgi --dry-run
 composer benchmark:frameworks -- disable-fastcgi --force
-composer benchmark:frameworks -- docker --port=8080 --dry-run
-composer benchmark:frameworks -- docker --port=8080
+composer benchmark:frameworks -- docker --dry-run
+composer benchmark:frameworks -- docker
+composer benchmark:frameworks -- docker-stop
 ```
 
 `disable-fastcgi` reads the web server's loaded `php.ini`, creates a
 `.benchmark.bak` backup, and requires appropriate local filesystem permissions.
 Restart PHP-FPM afterward. Docker mode builds the bundled suite's Apache image,
-mounts `frameworks/` at `/var/www/html/frameworks`, and starts a named,
-host-networked container in the background.
+mounts `frameworks/` at `/var/www/html/frameworks`, and starts a named container
+in the background. By default Docker publishes Apache on an available ephemeral
+loopback port and records the resulting base URL in the ignored
+`frameworks/.benchmark-server.json` file. Later `doctor`, `check`, and `run`
+commands load that URL automatically. Pass `--port=N` only when a fixed port is
+required. The static URL in `frameworks/config` is only a fallback for a manually
+managed web server; it is not used while the Docker runtime file exists.
 
 ### Results history and dashboard
 

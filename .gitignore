@@ -1,4 +1,5 @@
 /vendor/
+/frameworks/.benchmark-server.json
 /.phpbench/
 .idea
 example.php
