@@ -7,7 +7,7 @@ on:
     paths-ignore:
       - 'docs/**'
   schedule:
-    - cron: '17 2 * * 1'
+    - cron: '17 2 1 * *'
   workflow_dispatch:
 
 permissions:
@@ -52,7 +52,7 @@ jobs:
         run: composer benchmark:frameworks -- check
 
       - name: Run framework benchmarks
-        run: composer benchmark:frameworks -- run --output=docs
+        run: composer benchmark:frameworks -- run --output=docs --stability=10 --history-limit=61 --replace-monthly
 
       - name: Stop benchmark server
         if: always()

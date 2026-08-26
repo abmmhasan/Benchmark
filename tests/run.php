@@ -816,15 +816,21 @@ namespace {
     );
 
     $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));
-    $history = new BenchmarkHistory($historyDirectory);
+    $history = new BenchmarkHistory($historyDirectory, 61, true);
     $historyResult = $result;
     $historyResult['remoteMetrics'] = [
         'server_execution_ms' => ['samples' => 100, 'average' => 1.25, 'minimum' => 1.0, 'maximum' => 2.0],
         'included_files' => ['samples' => 100, 'average' => 17.0, 'minimum' => 17.0, 'maximum' => 17.0],
     ];
-    $firstArchive = $history->save(['results' => ['test' => $historyResult]], '# First');
+    $firstArchive = $history->save([
+        'recordedAt' => '2026-06-10T08:15:00+00:00',
+        'results' => ['test' => $historyResult],
+    ], '# First');
     $historyResult['peak']['req_per_min'] *= 1.10;
-    $secondArchive = $history->save(['results' => ['test' => $historyResult]], '# Second');
+    $secondArchive = $history->save([
+        'recordedAt' => '2026-07-10T12:30:00+00:00',
+        'results' => ['test' => $historyResult],
+    ], '# Second');
     $assert(count($history->entries()) === 2, 'benchmark history lists archived runs');
     $assert(
         is_file($firstArchive . '/results.json')
@@ -849,18 +855,59 @@ namespace {
         && str_contains($dashboard, 'Concurrency curves')
         && str_contains($dashboard, 'All concurrency measurements')
         && str_contains($dashboard, 'data-sortable')
+        && str_contains($dashboard, 'humanDateTime')
+        && str_contains($dashboard, 'prefers-color-scheme: dark')
+        && str_contains($dashboard, 'Theme · Auto')
         && str_contains($dashboard, 'server_execution_ms'),
-        'browser dashboard includes Bootstrap, sorted guidance, concurrency detail, and sortable data',
+        'browser dashboard includes Bootstrap, system-aware themes, readable dates, sorted guidance, concurrency detail, and sortable data',
     );
     $expectException(
         RuntimeException::class,
         static fn() => $history->delete(0),
         'history deletion requires approval',
     );
+    $replacementArchive = $history->save([
+        'recordedAt' => '2026-07-20T12:30:00+00:00',
+        'results' => ['test' => $historyResult],
+    ], '# July replacement');
+    $historyIndex = file_get_contents($historyDirectory . '/index.html');
+    $assert(
+        count($history->entries()) === 2
+        && !is_dir($secondArchive)
+        && is_dir($replacementArchive),
+        'a newer benchmark replaces the previous result from the same UTC month',
+    );
+    $assert(
+        is_string($historyIndex)
+        && str_contains($historyIndex, 'July 20, 2026 at 12:30 PM UTC')
+        && str_contains($historyIndex, 'prefers-color-scheme:dark')
+        && str_contains($historyIndex, 'data-local-time')
+        && str_contains($historyIndex, 'Monthly, reproducible reports'),
+        'history index follows the system theme and localizes readable dates for the visitor',
+    );
     $deleted = $history->deleteAll(true);
-    $assert(count($deleted) === 2 && !is_dir($firstArchive) && !is_dir($secondArchive), 'approved history deletion is bounded to run directories');
+    $assert(count($deleted) === 2 && !is_dir($firstArchive) && !is_dir($replacementArchive), 'approved history deletion is bounded to run directories');
     unlink($historyDirectory . '/index.html');
     rmdir($historyDirectory);
+
+    $retentionDirectory = sys_get_temp_dir() . '/benchmark-retention-' . bin2hex(random_bytes(8));
+    $retentionHistory = new BenchmarkHistory($retentionDirectory, 61, true);
+    $oldestArchive = '';
+    $month = new DateTimeImmutable('2020-01-01T00:00:00+00:00');
+    for ($index = 0; $index < 62; ++$index) {
+        $archive = $retentionHistory->save([
+            'recordedAt' => $month->modify("+{$index} months")->format(DATE_ATOM),
+            'results' => [],
+        ], '# Retention');
+        $oldestArchive = $index === 0 ? $archive : $oldestArchive;
+    }
+    $assert(
+        count($retentionHistory->entries()) === 61 && !is_dir($oldestArchive),
+        'history automatically retains only the newest 61 monthly records',
+    );
+    $assert(count($retentionHistory->deleteAll(true)) === 61, 'retained history can be cleaned safely');
+    unlink($retentionDirectory . '/index.html');
+    rmdir($retentionDirectory);
 
     $toBytes = new ReflectionMethod(ContainerStats::class, 'toBytes');
     $assert($toBytes->invoke(null, '1.5GiB') === 1_610_612_736.0, 'Docker memory units are parsed');

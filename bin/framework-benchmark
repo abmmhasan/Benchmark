@@ -43,6 +43,8 @@ Common options:
   --base-url=URL        Override the base URL read from suite config
   --target=NAMES        Comma-separated framework names; defaults to all
   --output=PATH         History root (default: .benchmark-output)
+  --history-limit=N     Keep only the newest N archived runs
+  --replace-monthly     Replace an earlier run from the same UTC calendar month
   --dry-run             Print planned lifecycle/system commands without executing them
   --force               Confirm setup, update, clean, php.ini, or history replacement
 
@@ -52,7 +54,7 @@ Run options:
   --count=N             Minimum requests per phase (default: 5000)
   --duration=SECONDS    Minimum phase duration; defaults to suite duration
   --repetitions=N       Repetitions from 1 to 3 (default: 3)
-  --stability=PERCENT   Maximum stable RPM spread (default: 5)
+  --stability=PERCENT   Maximum stable RPM spread (default: 5; CI uses 10)
   --timeout=SECONDS     Per-request timeout (default: 10)
   --warm-up=N           Warm-up requests per repetition (default: 10)
   --fresh               Clean and set up targets before benchmarking; requires --force
@@ -216,7 +218,14 @@ function suite(array $options): PhpFrameworksBenchSuite
 /** @param array<string, mixed> $options */
 function history(array $options): BenchmarkHistory
 {
-    return new BenchmarkHistory((string) stringOption($options, 'output', '.benchmark-output'));
+    $limit = stringOption($options, 'history-limit') === null
+        ? null
+        : integerOption($options, 'history-limit', 61, 1, 10_000);
+    return new BenchmarkHistory(
+        (string) stringOption($options, 'output', '.benchmark-output'),
+        $limit,
+        flag($options, 'replace-monthly'),
+    );
 }
 
 /** @return string|int */
@@ -244,12 +253,12 @@ if (!in_array($command, $knownCommands, true)) {
 try {
     if ($command === 'list') {
         $entries = history($options)->entries();
-        fwrite(STDOUT, "Index  Recorded at                Targets  Identifier\n");
+        fwrite(STDOUT, "Index  Recorded at (UTC)                       Targets  Identifier\n");
         foreach ($entries as $index => $entry) {
             fwrite(STDOUT, sprintf(
-                "%-6d %-26s %-8d %s\n",
+                "%-6d %-39s %-8d %s\n",
                 $index,
-                $entry['recordedAt'],
+                $entry['recordedAtDisplay'],
                 $entry['targets'],
                 $entry['id'],
             ));
