@@ -139,15 +139,20 @@ which targets run and in what order.
 Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
 as canonical `results.json`, `report.md`, and an interactive Bootstrap 5.3.8
 `dashboard.html`. The history root also gets an `index.html` linking all runs.
-Pass `--no-archive` to disable files.
+Browser reports display dates using the visitor's locale and time zone; CLI
+history listings use a human-readable UTC format. Pass `--no-archive` to disable
+files.
 
-The `Framework benchmarks` GitHub Actions workflow runs weekly, after non-docs
-changes land on `main`, or manually. It opens or updates a pull request containing
-the generated `docs/` reports instead of committing directly to `main`. After the
-results PR is reviewed and merged, the separate `Benchmark Pages` workflow
-deploys `docs/` to GitHub Pages. Set the repository's Pages source to **GitHub
-Actions** and enable **Allow GitHub Actions to create and approve pull requests**
-in the repository Actions settings.
+The `Framework benchmarks` GitHub Actions workflow runs on day 1 of every month,
+after non-docs changes land on `main`, or manually. It uses a 10% RPM stability
+threshold and opens or updates a pull request containing the generated `docs/`
+reports instead of committing directly to `main`. After the results PR is
+reviewed and merged, the separate `Benchmark Pages` workflow deploys `docs/` to
+GitHub Pages. Set the repository's Pages source to **GitHub Actions** and enable
+**Allow GitHub Actions to create and approve pull requests** in the repository
+Actions settings. Published docs retain one result per UTC calendar month; a
+newer result replaces the earlier result from that month, with at most 61 monthly
+records retained.
 
 ### Framework lifecycle and runtime preparation
 

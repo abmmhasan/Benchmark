@@ -4,14 +4,25 @@ declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
+use Throwable;
 
 /** Stores, lists, compares, renders, and safely removes benchmark run archives. */
 final class BenchmarkHistory
 {
-    public function __construct(private readonly string $root) {}
+    public function __construct(
+        private readonly string $root,
+        private readonly ?int $maximumEntries = null,
+        private readonly bool $replaceMonthly = false,
+    ) {
+        if ($this->maximumEntries !== null && $this->maximumEntries < 1) {
+            throw new InvalidArgumentException('maximumEntries must be at least 1');
+        }
+    }
 
     public function getRoot(): string
     {
@@ -22,7 +33,16 @@ final class BenchmarkHistory
     public function save(array $payload, string $markdown): string
     {
         $this->ensureRoot();
-        $prefix = gmdate('Y-m-d\THis\Z');
+        $payload['schemaVersion'] ??= 1;
+        $payload['recordedAt'] ??= gmdate(DATE_ATOM);
+        $recordedAt = self::dateTime((string) $payload['recordedAt']);
+        if ($recordedAt === null) {
+            throw new InvalidArgumentException('recordedAt must be a valid date and time');
+        }
+        $recordedAt = $recordedAt->setTimezone(new DateTimeZone('UTC'));
+        $payload['recordedAt'] = $recordedAt->format(DATE_ATOM);
+
+        $prefix = $recordedAt->format('Y-m-d\THis\Z');
         $directory = '';
         for ($attempt = 0; $attempt < 100; ++$attempt) {
             $identifier = $prefix . ($attempt === 0 ? '' : sprintf('-%02d', $attempt));
@@ -37,17 +57,16 @@ final class BenchmarkHistory
             throw new RuntimeException("Unable to allocate a unique result directory under {$this->root}");
         }
 
-        $payload['schemaVersion'] ??= 1;
-        $payload['recordedAt'] ??= gmdate(DATE_ATOM);
         $this->write($directory . '/results.json', self::encode($payload) . PHP_EOL);
         $this->write($directory . '/report.md', $markdown);
         $this->write($directory . '/dashboard.html', BenchmarkDashboard::render($payload));
+        $this->prune($payload['id'], $recordedAt);
         $this->writeIndex();
 
         return $directory;
     }
 
-    /** @return list<array{id:string, recordedAt:string, targets:int, path:string}> */
+    /** @return list<array{id:string, recordedAt:string, recordedAtDisplay:string, targets:int, path:string}> */
     public function entries(): array
     {
         if (!is_dir($this->root)) {
@@ -69,10 +88,18 @@ final class BenchmarkHistory
             $entries[] = [
                 'id' => $id,
                 'recordedAt' => (string) ($payload['recordedAt'] ?? $id),
+                'recordedAtDisplay' => self::humanDateTime((string) ($payload['recordedAt'] ?? $id)),
                 'targets' => count(self::results($payload)),
                 'path' => $directory,
             ];
         }
+
+        usort($entries, static function (array $left, array $right): int {
+            $leftTimestamp = self::dateTime($left['recordedAt'])?->getTimestamp() ?? PHP_INT_MIN;
+            $rightTimestamp = self::dateTime($right['recordedAt'])?->getTimestamp() ?? PHP_INT_MIN;
+            $byDate = $rightTimestamp <=> $leftTimestamp;
+            return $byDate !== 0 ? $byDate : strcmp($right['id'], $left['id']);
+        });
 
         return $entries;
     }
@@ -192,10 +219,11 @@ final class BenchmarkHistory
         $items = '';
         foreach ($this->entries() as $position => $entry) {
             $id = htmlspecialchars($entry['id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $date = htmlspecialchars($entry['recordedAt'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $recordedAt = htmlspecialchars($entry['recordedAt'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $date = htmlspecialchars($entry['recordedAtDisplay'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
             $latest = $position === 0 ? '<span class="badge text-bg-primary">Latest</span>' : '';
             $items .= "<a class=\"run-card text-decoration-none\" href=\"{$id}/dashboard.html\">"
-                . "<span><strong>{$date}</strong><small>{$id}</small></span>"
+                . "<span><strong><time datetime=\"{$recordedAt}\" data-local-time>{$date}</time></strong></span>"
                 . "<span class=\"run-meta\">{$latest}<span>{$entry['targets']} targets</span><b aria-hidden=\"true\">→</b></span>"
                 . "</a>\n";
         }
@@ -207,17 +235,62 @@ final class BenchmarkHistory
             . "<title>PHP framework benchmark history</title>"
             . "<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css\" rel=\"stylesheet\" "
             . "integrity=\"sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB\" crossorigin=\"anonymous\">"
-            . "<style>:root{--page:#f4f7fb;--surface:#fff;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6}"
+            . "<style>:root{color-scheme:light dark;--page:#f4f7fb;--surface:#fff;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6;--shadow:rgba(30,41,59,.07);--shadow-hover:rgba(30,41,59,.12)}"
+            . "@media(prefers-color-scheme:dark){:root{--page:#07111f;--surface:#0e1b2e;--text:#e8eef8;--muted:#98a9bf;--line:#283b55;--primary:#8b8cf8;--shadow:rgba(0,0,0,.24);--shadow-hover:rgba(0,0,0,.34)}}"
             . "*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 0,rgba(91,91,214,.15),transparent 32rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}"
             . ".shell{width:min(920px,calc(100% - 32px));margin:auto;padding:58px 0}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}"
             . "h1{margin:7px 0 8px;font-size:clamp(30px,6vw,48px);letter-spacing:-.04em}.lead{margin:0 0 28px;color:var(--muted)}.runs{display:grid;gap:11px}"
-            . ".run-card{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 19px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 12px 34px rgba(30,41,59,.07);transition:.18s ease}"
-            . ".run-card:hover{border-color:var(--primary);color:var(--primary);transform:translateY(-2px);box-shadow:0 18px 42px rgba(30,41,59,.12)}.run-card small{display:block;margin-top:3px;color:var(--muted);font-family:ui-monospace,monospace}"
+            . ".run-card{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 19px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 12px 34px var(--shadow);transition:.18s ease}"
+            . ".run-card:hover{border-color:var(--primary);color:var(--primary);transform:translateY(-2px);box-shadow:0 18px 42px var(--shadow-hover)}"
             . ".run-meta{display:flex;align-items:center;gap:12px;white-space:nowrap;color:var(--muted)}.run-meta b{color:var(--primary);font-size:20px}.empty{padding:32px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);background:var(--surface)}"
             . "@media(max-width:560px){.shell{padding-top:34px}.run-card{align-items:flex-start;flex-direction:column}.run-meta{width:100%;justify-content:space-between}}</style></head>"
             . "<body><main class=\"shell\"><div class=\"eyebrow\">Benchmark archive</div><h1>PHP framework performance</h1>"
-            . "<p class=\"lead\">Weekly, reproducible reports generated with validated HTTP responses.</p><div class=\"runs\">{$items}</div></main></body></html>";
+            . "<p class=\"lead\">Monthly, reproducible reports generated with validated HTTP responses. Times are shown in your local time zone.</p><div class=\"runs\">{$items}</div></main>"
+            . "<script>document.querySelectorAll('time[data-local-time]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(date)})</script></body></html>";
         $this->write(rtrim($this->root, '/') . '/index.html', $html);
+    }
+
+    private function prune(string $currentId, DateTimeImmutable $recordedAt): void
+    {
+        if ($this->replaceMonthly) {
+            $currentMonth = $recordedAt->format('Y-m');
+            foreach ($this->entries() as $entry) {
+                if ($entry['id'] === $currentId) {
+                    continue;
+                }
+                $entryDate = self::dateTime($entry['recordedAt']);
+                if ($entryDate !== null && $entryDate->setTimezone(new DateTimeZone('UTC'))->format('Y-m') === $currentMonth) {
+                    self::removeTree($entry['path']);
+                }
+            }
+        }
+
+        if ($this->maximumEntries !== null) {
+            foreach (array_slice($this->entries(), $this->maximumEntries) as $entry) {
+                self::removeTree($entry['path']);
+            }
+        }
+    }
+
+    public static function humanDateTime(string $value): string
+    {
+        $date = self::dateTime($value);
+        if ($date === null) {
+            return $value;
+        }
+
+        return $date
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('F j, Y \a\t g:i A \U\T\C');
+    }
+
+    private static function dateTime(string $value): ?DateTimeImmutable
+    {
+        try {
+            return new DateTimeImmutable($value);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function ensureRoot(): void
