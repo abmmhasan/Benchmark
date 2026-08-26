@@ -52,18 +52,24 @@ PHP runtime. `update` deliberately performs the same clean recreation, allowing
 it to cross framework major versions rather than remaining constrained by the
 generated project's old `composer.json`.
 
-The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `infbyte`,
-`kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`, `pure-php`,
-`slim`, `symfony`, and `yii-basic`. The API target remains separate because it
-measures Laravel's API routing/JSON response path rather than its web route.
+The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
+`infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`,
+`pure-php`, `slim`, `symfony`, and `yii-basic`. The API target remains separate
+because it measures Laravel's API routing/JSON response path rather than its web
+route.
 
 ### Run all targets
 
-Omitting `--target` selects every framework listed in `frameworks/config`:
+Omitting `--target` selects every framework listed in `frameworks/config`.
+
+#### Generate and view results
 
 ```bash
 # Create every framework application from its latest compatible release.
 composer benchmark:frameworks -- setup --force
+
+# Later, recreate every application from the latest compatible release.
+composer benchmark:frameworks -- update --force
 
 # Validate every endpoint before measurement.
 composer benchmark:frameworks -- check
@@ -71,9 +77,14 @@ composer benchmark:frameworks -- check
 # Benchmark every configured framework.
 composer benchmark:frameworks -- run
 
-# Recreate every application from the latest compatible release.
-composer benchmark:frameworks -- update --force
+# List archived runs and regenerate the newest visual dashboard.
+composer benchmark:frameworks -- list
+composer benchmark:frameworks -- dashboard --run=0
+```
 
+#### Clean up generated applications
+
+```bash
 # Remove every generated application while preserving benchmark scripts.
 composer benchmark:frameworks -- clean --force
 ```
@@ -86,7 +97,7 @@ composer benchmark:frameworks -- setup --target=slim,symfony,laravel-api --force
 composer benchmark:frameworks -- check --target=slim,symfony,laravel-api
 ```
 
-Run the benchmark without `wrk`:
+Run using the built-in PHP load generator:
 
 ```bash
 composer benchmark:frameworks -- \
@@ -107,7 +118,7 @@ reported separately from end-to-end libcurl latency.
 The suite base URL, duration, connection count, and unversioned target list are
 defined in `frameworks/config`. Use `--suite` only to exercise a compatible
 external suite. `connections` maps to this runner's maximum
-concurrency; the old `wrk` worker-thread setting is intentionally irrelevant.
+concurrency for the built-in PHP load generator.
 Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
 as canonical `results.json`, `report.md`, and a dependency-free
 `dashboard.html`. The history root also gets an `index.html` linking all runs.

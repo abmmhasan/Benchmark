@@ -1,10 +1,10 @@
 /vendor/
-/.benchmark-output/
 /.phpbench/
 .idea
 example.php
 composer.lock
 *.md
+!README.md
 *.log
 *.pdf
 docs.txt

@@ -21,6 +21,7 @@ case "$target" in
     cakephp) package="cakephp/app" ;;
     codeigniter) package="codeigniter4/appstarter" ;;
     fatfree) package="bcosca/fatfree-core" ;;
+    flight) package="flightphp/skeleton" ;;
     infbyte) package="infocyph/infbyte" ;;
     kumbia) package="kumbia/framework" ;;
     laravel|laravel-api) package="laravel/laravel" ;;
@@ -98,6 +99,9 @@ setup_project() {
             rm -f -- "$target_dir/public/.htaccess"
             chmod -R a+rwX "$target_dir/writable"
             ;;
+        flight)
+            chmod -R a+rwX "$target_dir/app/cache" "$target_dir/app/log"
+            ;;
         infbyte)
             rm -f -- "$target_dir/public/.htaccess"
             php "$target_dir/infbyte" optimize
@@ -142,6 +146,7 @@ clear_cache() {
         slim) clear_directory "$target_dir/var/cache" ;;
         symfony) APP_ENV=prod APP_DEBUG=0 php "$target_dir/bin/console" cache:clear --no-debug ;;
         yii-basic) clear_directory "$target_dir/runtime/cache" ;;
+        flight) clear_directory "$target_dir/app/cache" ;;
         fatfree|leaf|pure-php) : ;;
     esac
 }

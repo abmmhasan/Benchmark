@@ -718,7 +718,7 @@ namespace {
     $bundledSuiteDirectory = dirname(__DIR__) . '/frameworks';
     $bundledSuite = new PhpFrameworksBenchSuite($bundledSuiteDirectory);
     $bundledTargets = [
-        'cakephp', 'codeigniter', 'fatfree', 'infbyte', 'kumbia', 'laravel',
+        'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'lumen', 'nette', 'pure-php', 'slim', 'symfony',
         'yii-basic',
     ];
