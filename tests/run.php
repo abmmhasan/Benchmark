@@ -90,11 +90,14 @@ namespace AbmmHasan\Benchmark {
 
 namespace {
     use AbmmHasan\Benchmark\BenchmarkConfig;
+    use AbmmHasan\Benchmark\BenchmarkHistory;
     use AbmmHasan\Benchmark\BenchmarkRunner;
     use AbmmHasan\Benchmark\ContainerStats;
     use AbmmHasan\Benchmark\FakeCurl;
     use AbmmHasan\Benchmark\HttpMethod;
     use AbmmHasan\Benchmark\PipingMode;
+    use AbmmHasan\Benchmark\PhpFrameworksBenchSuite;
+    use AbmmHasan\Benchmark\PhpFrameworksBenchManager;
     use AbmmHasan\Benchmark\RequestBenchmark;
     use AbmmHasan\Benchmark\UnitBenchmark;
 
@@ -132,6 +135,7 @@ namespace {
         skipPreflight: $overrides['skipPreflight'] ?? true,
         responseValidator: $overrides['validator'] ?? $validator,
         responseMemoryExtractor: $overrides['memoryExtractor'] ?? null,
+        responseMetricsExtractor: $overrides['metricsExtractor'] ?? null,
     );
 
     $assert(enum_exists(HttpMethod::class), 'HttpMethod autoloads directly');
@@ -253,6 +257,25 @@ namespace {
     ]));
     $withMemoryExtractor->runSingleThreaded();
     $assert($withMemoryExtractor->getRemoteMemoryMB() === 1.0, 'optional response memory is measured in bytes');
+    $withMetricsExtractor = new RequestBenchmark($resolvedConfig([
+        'metricsExtractor' => static fn(string $body): array => [
+            'server_execution_ms' => 1.25,
+            'included_files' => 17,
+            'Invalid Name' => 99,
+            'negative' => -1,
+        ],
+    ]));
+    $withMetricsExtractor->runSingleThreaded();
+    $remoteMetrics = $withMetricsExtractor->getRemoteMetrics();
+    $assert(
+        $remoteMetrics['server_execution_ms']['average'] === 1.25
+        && $remoteMetrics['included_files']['average'] === 17.0,
+        'generic response metrics are aggregated',
+    );
+    $assert(
+        !isset($remoteMetrics['Invalid Name'], $remoteMetrics['negative']),
+        'invalid response metrics are ignored safely',
+    );
 
     FakeCurl::reset();
     $failFastRunner = BenchmarkRunner::make()
@@ -274,16 +297,25 @@ namespace {
     $assert(FakeCurl::$execCount === 4, 'fail-fast target validation performs no benchmark traffic');
 
     FakeCurl::reset();
+    $preparedRepetitions = [];
     $perConfigRunner = BenchmarkRunner::make()
         ->warmUpRequests(0)
         ->minimumDuration(0)
         ->stabilityThreshold(10_000)
+        ->beforeRepetition(static function (BenchmarkConfig $config, int $run) use (&$preparedRepetitions): void {
+            $preparedRepetitions[] = [$config->getName(), $run];
+        })
         ->addConfigs(
             $resolvedConfig(['threads' => 4, 'name' => 'per-config']),
             $resolvedConfig(['threads' => 4, 'name' => 'rotation-target']),
         );
     $results = $perConfigRunner->runAll();
     $result = $results['per-config'];
+    $assert(
+        count($preparedRepetitions) === 6
+        && $preparedRepetitions[0] === ['per-config', 1],
+        'runtime preparation hooks run before every target repetition',
+    );
     $assert(count($result['runs']) === 3, 'three repeated runs are recorded');
     $assert(array_keys($result['throughputCurve']) === [2, 4], 'default concurrency curve is recorded');
     $assert($result['score'] === $result['stable']['req_per_min'], 'ranking score is stable RPM');
@@ -293,6 +325,10 @@ namespace {
     );
     $assert(isset($result['multiple']['req_per_min_mad']), 'repeated-run RPM variance is recorded');
     $assert($result['configuration']['responseValidation'] === true, 'reproduction metadata is recorded');
+    $assert(
+        $result['configuration']['loadGenerator'] === 'php-curl-multi',
+        'load-generator implementation is recorded',
+    );
     $assert(
         $result['runs'][0]['targetOrder'] === ['per-config', 'rotation-target']
         && $result['runs'][1]['targetOrder'] === ['rotation-target', 'per-config'],
@@ -406,6 +442,27 @@ namespace {
         'target-specific configuration follows overall benchmark rank',
     );
     $assert(!str_contains($comparisonMarkdown, '| Recorded at |'), 'timestamps are not presented as configuration');
+    $groupData['fast']['remoteMemoryMB'] = 1.25;
+    $groupData['fast']['remoteMetrics'] = [
+        'server_execution_ms' => ['samples' => 100, 'average' => 1.25, 'minimum' => 1.0, 'maximum' => 2.0],
+        'included_files' => ['samples' => 100, 'average' => 17.0, 'minimum' => 17.0, 'maximum' => 17.0],
+    ];
+    $resourceMarkdown = $toMarkdownTable->invoke($perConfigRunner, $groupData);
+    $assert(
+        str_contains($resourceMarkdown, '## Resource telemetry')
+        && str_contains($resourceMarkdown, '| fast | 0 | — | — | — | — | 1.25 |'),
+        'response memory is reported even when Docker telemetry is unavailable',
+    );
+    $assert(
+        str_contains($resourceMarkdown, '## Server response telemetry')
+        && str_contains($resourceMarkdown, '| fast | Server execution ms | 100 | 1.25000 |'),
+        'generic server response telemetry is reported',
+    );
+    $assert(
+        str_contains($resourceMarkdown, '## Relative comparison')
+        && str_contains($resourceMarkdown, 'Peak throughput'),
+        'relative throughput and resource comparisons are reported',
+    );
     $tableSection = static function (string $markdown, string $title): string {
         preg_match(
             '/## ' . preg_quote($title, '/') . '\R\R(?<table>.*?)(?=\R\R## |\z)/s',
@@ -550,6 +607,191 @@ namespace {
     );
     $afterFailure = UnitBenchmark::run(static fn(): bool => true);
     $assert($afterFailure['return'] === true, 'unit benchmark state resets after exceptions');
+
+    $suiteDirectory = sys_get_temp_dir() . '/benchmark-framework-suite-' . bin2hex(random_bytes(8));
+    mkdir($suiteDirectory . '/alpha/_benchmark', 0777, true);
+    mkdir($suiteDirectory . '/beta/_benchmark', 0777, true);
+    mkdir($suiteDirectory . '/.docker', 0777, true);
+    file_put_contents(
+        $suiteDirectory . '/config',
+        "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
+        . "frameworks_list=\"\nalpha\nbeta\n\"\n",
+    );
+    file_put_contents(
+        $suiteDirectory . '/alpha/_benchmark/hello_world.sh',
+        "#!/bin/sh\nurl=\"\$base/\$fw/public/index.php/hello/index\"\n",
+    );
+    file_put_contents(
+        $suiteDirectory . '/beta/_benchmark/hello_world.sh',
+        "#!/bin/sh\nurl=\"\$base/\$fw/web/index.php?r=hello/index\"\n",
+    );
+    file_put_contents($suiteDirectory . '/alpha/_benchmark/setup.sh', "#!/bin/sh\nexit 0\n");
+    file_put_contents($suiteDirectory . '/alpha/_benchmark/clean.sh', "#!/bin/sh\nexit 0\n");
+    file_put_contents($suiteDirectory . '/.docker/apache.dockerfile', "FROM php:8.4-apache\n");
+
+    try {
+        $frameworkSuite = new PhpFrameworksBenchSuite($suiteDirectory);
+        $assert($frameworkSuite->targets() === ['alpha', 'beta'], 'framework targets follow suite config order');
+        $assert($frameworkSuite->getSuggestedConcurrency() === 42, 'suite connection default is imported');
+        $assert($frameworkSuite->getSuggestedDuration() === 17, 'suite duration default is imported');
+        $suiteConfigs = $frameworkSuite->configs(['beta']);
+        $assert(count($suiteConfigs) === 1, 'framework target selection is supported');
+        $assert(
+            $suiteConfigs[0]->getUrl() === 'http://127.0.0.1/bench/beta/web/index.php?r=hello/index',
+            'framework target URL is imported without executing shell code',
+        );
+
+        $textResponse = "Hello World!\n 1048576:0.001250:17";
+        $jsonResponse = "{\"status\":true,\"message\":\"Hello World!\"}\n 2097152:0.002500:23";
+        $assert(PhpFrameworksBenchSuite::isExpectedResponse($textResponse), 'text framework response is validated');
+        $assert(PhpFrameworksBenchSuite::isExpectedResponse($jsonResponse), 'JSON framework response is validated');
+        $assert(
+            PhpFrameworksBenchSuite::extractMemoryBytes($jsonResponse) === 2_097_152.0,
+            'framework response memory telemetry is extracted',
+        );
+        $assert(
+            PhpFrameworksBenchSuite::extractResponseMetrics($jsonResponse) === [
+                'server_execution_ms' => 2.5,
+                'included_files' => 23,
+            ],
+            'framework execution time and included-file telemetry are extracted',
+        );
+        $assert(
+            !PhpFrameworksBenchSuite::isExpectedResponse("Wrong response\n 1048576:0.001250:17"),
+            'wrong framework response is rejected',
+        );
+        $expectException(
+            InvalidArgumentException::class,
+            static fn() => $frameworkSuite->configs(['missing']),
+            'unknown framework targets are rejected',
+        );
+
+        $frameworkManager = new PhpFrameworksBenchManager($frameworkSuite);
+        $setupPlan = $frameworkManager->lifecycle('setup', ['alpha'], dryRun: true);
+        $assert(
+            $setupPlan[0]['status'] === 'dry-run'
+            && $setupPlan[0]['command'] === [
+                'bash',
+                '-O',
+                'extglob',
+                $suiteDirectory . '/alpha/_benchmark/setup.sh',
+            ],
+            'framework setup commands can be inspected without execution',
+        );
+        $expectException(
+            RuntimeException::class,
+            static fn() => $frameworkManager->lifecycle('clean', ['alpha']),
+            'destructive framework cleanup requires approval',
+        );
+        $expectException(
+            RuntimeException::class,
+            static fn() => $frameworkManager->lifecycle('update', ['alpha']),
+            'latest-version framework recreation requires approval',
+        );
+        $restartPlan = $frameworkManager->restartServices(['apache', 'php-fpm'], dryRun: true);
+        $assert(
+            $restartPlan[0]['unit'] === 'apache2'
+            && str_starts_with($restartPlan[1]['unit'], 'php8.4-fpm'),
+            'web service restart commands are generated explicitly',
+        );
+        $dockerPlan = $frameworkManager->dockerApache(dryRun: true);
+        $assert(
+            $dockerPlan[0]['command'][0] === 'docker'
+            && $dockerPlan[1]['status'] === 'dry-run',
+            'Docker Apache build and run commands support dry-run',
+        );
+    } finally {
+        unlink($suiteDirectory . '/alpha/_benchmark/setup.sh');
+        unlink($suiteDirectory . '/alpha/_benchmark/clean.sh');
+        unlink($suiteDirectory . '/alpha/_benchmark/hello_world.sh');
+        unlink($suiteDirectory . '/beta/_benchmark/hello_world.sh');
+        unlink($suiteDirectory . '/.docker/apache.dockerfile');
+        unlink($suiteDirectory . '/config');
+        rmdir($suiteDirectory . '/alpha/_benchmark');
+        rmdir($suiteDirectory . '/alpha');
+        rmdir($suiteDirectory . '/beta/_benchmark');
+        rmdir($suiteDirectory . '/beta');
+        rmdir($suiteDirectory . '/.docker');
+        rmdir($suiteDirectory);
+    }
+
+    $bundledSuiteDirectory = dirname(__DIR__) . '/frameworks';
+    $bundledSuite = new PhpFrameworksBenchSuite($bundledSuiteDirectory);
+    $bundledTargets = [
+        'cakephp', 'codeigniter', 'fatfree', 'infbyte', 'kumbia', 'laravel',
+        'laravel-api', 'leaf', 'lumen', 'nette', 'pure-php', 'slim', 'symfony',
+        'yii-basic',
+    ];
+    $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
+    $assert(
+        $bundledSuite->configs(['symfony'])[0]->getUrl()
+            === 'http://127.0.0.1/frameworks/symfony/public/index.php/hello/index',
+        'bundled suite URL is generated from its internal config',
+    );
+    $allLifecycleScriptsExist = true;
+    $allGeneratedFilesAreIgnored = true;
+    foreach ($bundledTargets as $target) {
+        foreach (['setup', 'update', 'clean', 'clear-cache', 'hello_world'] as $action) {
+            $allLifecycleScriptsExist = $allLifecycleScriptsExist
+                && is_file("{$bundledSuiteDirectory}/{$target}/_benchmark/{$action}.sh");
+        }
+        $ignore = file_get_contents("{$bundledSuiteDirectory}/{$target}/.gitignore");
+        $allGeneratedFilesAreIgnored = $allGeneratedFilesAreIgnored
+            && is_string($ignore)
+            && str_contains($ignore, "*\n")
+            && str_contains($ignore, "!_benchmark/**");
+    }
+    $assert($allLifecycleScriptsExist, 'every bundled target provides the complete lifecycle script set');
+    $assert($allGeneratedFilesAreIgnored, 'every bundled target ignores generated create-project files');
+    $lifecycleSource = file_get_contents($bundledSuiteDirectory . '/_support/lifecycle.sh');
+    $assert(
+        is_string($lifecycleSource)
+        && str_contains($lifecycleSource, 'composer create-project')
+        && preg_match('/create-project[^\n]*:[0-9]/', $lifecycleSource) !== 1,
+        'Composer project creation does not pass a framework version constraint',
+    );
+
+    $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));
+    $history = new BenchmarkHistory($historyDirectory);
+    $historyResult = $result;
+    $historyResult['remoteMetrics'] = [
+        'server_execution_ms' => ['samples' => 100, 'average' => 1.25, 'minimum' => 1.0, 'maximum' => 2.0],
+        'included_files' => ['samples' => 100, 'average' => 17.0, 'minimum' => 17.0, 'maximum' => 17.0],
+    ];
+    $firstArchive = $history->save(['results' => ['test' => $historyResult]], '# First');
+    $historyResult['peak']['req_per_min'] *= 1.10;
+    $secondArchive = $history->save(['results' => ['test' => $historyResult]], '# Second');
+    $assert(count($history->entries()) === 2, 'benchmark history lists archived runs');
+    $assert(
+        is_file($firstArchive . '/results.json')
+        && is_file($firstArchive . '/report.md')
+        && is_file($firstArchive . '/dashboard.html')
+        && is_file($historyDirectory . '/index.html'),
+        'history archives canonical JSON, Markdown, dashboards, and an index',
+    );
+    $comparison = $history->compare(0, 1);
+    $assert(
+        str_contains($comparison, 'Benchmark comparison')
+        && str_contains($comparison, 'Peak RPM')
+        && str_contains($comparison, '+10.00%'),
+        'history comparison reports metric changes between runs',
+    );
+    $dashboard = file_get_contents($history->dashboard(0));
+    $assert(
+        is_string($dashboard)
+        && str_contains($dashboard, 'Peak observed requests/minute')
+        && str_contains($dashboard, 'server_execution_ms'),
+        'browser dashboard includes throughput and server telemetry',
+    );
+    $expectException(
+        RuntimeException::class,
+        static fn() => $history->delete(0),
+        'history deletion requires approval',
+    );
+    $deleted = $history->deleteAll(true);
+    $assert(count($deleted) === 2 && !is_dir($firstArchive) && !is_dir($secondArchive), 'approved history deletion is bounded to run directories');
+    unlink($historyDirectory . '/index.html');
+    rmdir($historyDirectory);
 
     $toBytes = new ReflectionMethod(ContainerStats::class, 'toBytes');
     $assert($toBytes->invoke(null, '1.5GiB') === 1_610_612_736.0, 'Docker memory units are parsed');

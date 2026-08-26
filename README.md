@@ -38,6 +38,158 @@ $results = BenchmarkRunner::make()
 echo $results;
 ```
 
+## Self-contained framework benchmarks
+
+The repository includes its own framework suite under `frameworks/`; the sibling
+`PHP-Frameworks-Bench` checkout is no longer required. Targets use stable,
+unversioned names. Each target keeps only its lifecycle scripts and benchmark
+route overlay in Git. The application produced by Composer—including its lock
+file, dependencies, environment files, and framework sources—is ignored.
+
+`setup` invokes `composer create-project` without a package version argument, so
+Composer selects the newest stable project release compatible with the current
+PHP runtime. `update` deliberately performs the same clean recreation, allowing
+it to cross framework major versions rather than remaining constrained by the
+generated project's old `composer.json`.
+
+The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `infbyte`,
+`kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`, `pure-php`,
+`slim`, `symfony`, and `yii-basic`. The API target remains separate because it
+measures Laravel's API routing/JSON response path rather than its web route.
+
+### Run all targets
+
+Omitting `--target` selects every framework listed in `frameworks/config`:
+
+```bash
+# Create every framework application from its latest compatible release.
+composer benchmark:frameworks -- setup --force
+
+# Validate every endpoint before measurement.
+composer benchmark:frameworks -- check
+
+# Benchmark every configured framework.
+composer benchmark:frameworks -- run
+
+# Recreate every application from the latest compatible release.
+composer benchmark:frameworks -- update --force
+
+# Remove every generated application while preserving benchmark scripts.
+composer benchmark:frameworks -- clean --force
+```
+
+Start by inspecting the environment and validating target responses:
+
+```bash
+composer benchmark:frameworks -- doctor
+composer benchmark:frameworks -- setup --target=slim,symfony,laravel-api --force
+composer benchmark:frameworks -- check --target=slim,symfony,laravel-api
+```
+
+Run the benchmark without `wrk`:
+
+```bash
+composer benchmark:frameworks -- \
+  --target=slim,symfony,laravel-api \
+  --connections=250 \
+  --concurrency=10,50,100,250 \
+  --count=5000 \
+  --duration=30
+```
+
+The integration understands both response shapes used by the fixture project:
+`Hello World!` and its JSON equivalent, followed by the memory, execution-time,
+and included-files telemetry suffix. Every measured response must have the
+expected HTTP status, valid body, and valid telemetry. Remote peak-memory bytes
+are imported into the report. Server execution time and included-file counts are
+reported separately from end-to-end libcurl latency.
+
+The suite base URL, duration, connection count, and unversioned target list are
+defined in `frameworks/config`. Use `--suite` only to exercise a compatible
+external suite. `connections` maps to this runner's maximum
+concurrency; the old `wrk` worker-thread setting is intentionally irrelevant.
+Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
+as canonical `results.json`, `report.md`, and a dependency-free
+`dashboard.html`. The history root also gets an `index.html` linking all runs.
+Pass `--no-archive` to disable files.
+
+### Framework lifecycle and runtime preparation
+
+Every target has `setup.sh`, `update.sh`, `clean.sh`, `clear-cache.sh`, and
+`hello_world.sh` under its `_benchmark` folder. These small wrappers call the
+bounded shared lifecycle implementation and apply that target's tracked overlay.
+Use `--target` to limit scope. Setup, update, and cleanup replace generated files
+and therefore require `--force`; every command supports `--dry-run`:
+
+```bash
+composer benchmark:frameworks -- setup --target=slim --dry-run
+composer benchmark:frameworks -- setup --target=slim --force
+composer benchmark:frameworks -- update --target=slim --force
+composer benchmark:frameworks -- clear-cache --target=slim
+composer benchmark:frameworks -- clean --target=slim --force
+```
+
+Fresh-install mode composes cleanup, setup, validation, and measurement:
+
+```bash
+composer benchmark:frameworks -- run --target=slim --fresh --force
+```
+
+Cache clearing, service restarts, and OPCache reset can run before every target
+repetition, outside the measurement window:
+
+```bash
+composer benchmark:frameworks -- run \
+  --clear-cache \
+  --service=apache,php-fpm \
+  --reset-opcache
+```
+
+Standalone runtime commands are also available:
+
+```bash
+composer benchmark:frameworks -- restart --service=nginx,php-fpm --dry-run
+composer benchmark:frameworks -- reset-opcache
+composer benchmark:frameworks -- disable-fastcgi --dry-run
+composer benchmark:frameworks -- disable-fastcgi --force
+composer benchmark:frameworks -- docker --port=8080 --dry-run
+composer benchmark:frameworks -- docker --port=8080
+```
+
+`disable-fastcgi` reads the web server's loaded `php.ini`, creates a
+`.benchmark.bak` backup, and requires appropriate local filesystem permissions.
+Restart PHP-FPM afterward. Docker mode builds the bundled suite's Apache image,
+mounts `frameworks/` at `/var/www/html/frameworks`, and starts a named,
+host-networked container in the background.
+
+### Results history and dashboard
+
+```bash
+composer benchmark:frameworks -- list
+composer benchmark:frameworks -- compare --current=0 --baseline=1
+composer benchmark:frameworks -- dashboard --run=0
+composer benchmark:frameworks -- delete --run=0 --force
+composer benchmark:frameworks -- delete-all --force
+```
+
+Indexes use newest-first ordering, so `0` means the latest run. Timestamp
+identifiers printed by `list` are also accepted. Comparison reports include stable
+and peak RPM, latency, error rate, remote memory, server execution time, and
+included-file changes for common targets.
+
+Inspect every command and option with:
+
+```bash
+php bin/framework-benchmark --help
+```
+
+The native PHP/libcurl engine is the default because it has no extra executable
+dependency and can validate every response body. For very high-throughput local
+targets, verify that the load-generator host is not saturated. A second run from
+another machine with a compiled generator such as `oha` is a useful capacity
+cross-check, but its status-based summary is not a substitute for this library's
+per-response application-level validation.
+
 The default concurrency curve is derived from the configured maximum when
 `concurrencyLevels()` is omitted. Repetitions are configurable from one to three
 and default to three. Target and concurrency order rotate between repetitions to
@@ -87,9 +239,18 @@ The Markdown report is organized for side-by-side comparison. Every concurrency
 level gets separate throughput, latency, and reliability tables, while serial
 measurements remain in their own latency and reliability tables. Configuration
 differences are pivoted by target. Shared settings, load-generator environment,
-and optional container resources remain separate. JSON is the canonical
+and optional resource telemetry remain separate. JSON is the canonical
 machine-readable output and CSV remains available for flat data-processing
 workflows.
+
+Use `formatResults()` to render already collected array results in another format
+without sending the benchmark traffic a second time:
+
+```php
+$results = $runner->runAll();
+$markdown = $runner->formatResults($results, 'table');
+$json = $runner->formatResults($results, 'json');
+```
 
 The first table is a sustainable ranking rather than a peak-throughput ranking.
 It shows the best stable RPM and concurrency beside the peak observed RPM,

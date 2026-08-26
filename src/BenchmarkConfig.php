@@ -44,6 +44,7 @@ final class BenchmarkConfig
     private bool $skipPreflight;
     private Closure $responseValidator;
     private ?Closure $responseMemoryExtractor;
+    private ?Closure $responseMetricsExtractor;
 
     public function __construct(
         string $url,
@@ -67,6 +68,7 @@ final class BenchmarkConfig
         bool $skipPreflight = false,
         ?callable $responseValidator = null,
         ?callable $responseMemoryExtractor = null,
+        ?callable $responseMetricsExtractor = null,
     ) {
         /* ---------- basic validation ---------- */
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
@@ -120,6 +122,9 @@ final class BenchmarkConfig
         $this->responseMemoryExtractor = $responseMemoryExtractor === null
             ? null
             : Closure::fromCallable($responseMemoryExtractor);
+        $this->responseMetricsExtractor = $responseMetricsExtractor === null
+            ? null
+            : Closure::fromCallable($responseMetricsExtractor);
     }
 
     /* ---------- getters ---------- */
@@ -215,5 +220,11 @@ final class BenchmarkConfig
     public function getResponseMemoryExtractor(): ?Closure
     {
         return $this->responseMemoryExtractor;
+    }
+
+    /** @return null|Closure(string, array<string, mixed>):array<string, int|float|null> */
+    public function getResponseMetricsExtractor(): ?Closure
+    {
+        return $this->responseMetricsExtractor;
     }
 }

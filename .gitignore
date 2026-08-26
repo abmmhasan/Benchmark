@@ -1,4 +1,5 @@
 /vendor/
+/.benchmark-output/
 /.phpbench/
 .idea
 example.php

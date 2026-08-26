@@ -1,0 +1,25 @@
+# Base URL used when --base-url is not supplied.
+base="http://127.0.0.1/frameworks"
+
+# Suggested benchmark defaults.
+duration=30
+connections=250
+
+# Unversioned targets. Setup resolves the newest Composer release compatible
+# with the installed PHP runtime; no framework version is pinned here.
+frameworks_list="
+cakephp
+codeigniter
+fatfree
+infbyte
+kumbia
+laravel
+laravel-api
+leaf
+lumen
+nette
+pure-php
+slim
+symfony
+yii-basic
+"

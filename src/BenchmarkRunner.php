@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AbmmHasan\Benchmark;
 
+use Closure;
 use InvalidArgumentException;
 use JsonException;
 use LogicException;
@@ -23,6 +24,7 @@ final class BenchmarkRunner
     private int $warmUpRequests = 10;
     private float $minimumDurationSeconds = 10.0;
     private float $maximumRpmSpreadPercent = 5.0;
+    private ?Closure $beforeRepetition = null;
 
     /** @var list<int> */
     private array $requestedConcurrencyLevels = [];
@@ -149,6 +151,13 @@ final class BenchmarkRunner
         return $this;
     }
 
+    /** Register setup work that runs before every target repetition and outside measurement. */
+    public function beforeRepetition(?callable $callback): self
+    {
+        $this->beforeRepetition = $callback === null ? null : Closure::fromCallable($callback);
+        return $this;
+    }
+
     public function addConfigs(BenchmarkConfig ...$configs): self
     {
         foreach ($configs as $config) {
@@ -166,6 +175,17 @@ final class BenchmarkRunner
     {
         $data = $this->runAllRaw();
 
+        return $this->formatResults($data, $format);
+    }
+
+    /**
+     * Format previously collected results without executing benchmark traffic again.
+     *
+     * @param array<string, array<string, mixed>> $data
+     * @param 'array'|'json'|'table'|'csv' $format
+     */
+    public function formatResults(array $data, string $format = 'array'): array|string
+    {
         return match ($format) {
             'json' => json_encode($data, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR),
             'table' => $this->toMarkdownTable($data),
@@ -279,6 +299,10 @@ final class BenchmarkRunner
     {
         $totalPhases = $this->repetitions * (count($levels) + 1);
         $baseProgress = $completedPhases / $totalPhases;
+        if ($this->beforeRepetition !== null) {
+            $this->console->updateTarget($baseProgress, 'preparing runtime');
+            ($this->beforeRepetition)($config, $run);
+        }
         $this->console->updateTarget($baseProgress, 'restarting container');
         $this->restartContainer($config->getContainer());
         $sampler = $config->getContainer() !== null
@@ -346,6 +370,7 @@ final class BenchmarkRunner
                 'concurrency' => $concurrent,
                 'concurrencyOrder' => $concurrencyOrder,
                 'remoteMemoryMB' => $benchmark->getRemoteMemoryMB(),
+                'remoteMetrics' => $benchmark->getRemoteMetrics(),
             ];
         } finally {
             if ($sampler !== null) {
@@ -387,11 +412,13 @@ final class BenchmarkRunner
 
         $singleMeasurements = [];
         $remoteMemoryMeasurements = [];
+        $remoteMetricMeasurements = [];
         foreach ($runs as $run) {
             $singleMeasurements[] = $run['single'];
             if ($run['remoteMemoryMB'] !== null) {
                 $remoteMemoryMeasurements[] = $run['remoteMemoryMB'];
             }
+            $remoteMetricMeasurements[] = $run['remoteMetrics'] ?? [];
         }
 
         $selectedConcurrency = null;
@@ -450,6 +477,7 @@ final class BenchmarkRunner
             'remoteMemoryMB' => $remoteMemoryMeasurements === []
                 ? null
                 : round(self::median($remoteMemoryMeasurements), 2),
+            'remoteMetrics' => self::combineRemoteMetrics($remoteMetricMeasurements),
             'container' => self::combineContainerStats($containerStats),
             'configuration' => $this->configurationMetadata($config, $levels, $safeWarmUp),
             'rankingStatus' => $rankingStatus,
@@ -533,6 +561,7 @@ final class BenchmarkRunner
             skipPreflight: $config->skipPreflight(),
             responseValidator: $config->getResponseValidator(),
             responseMemoryExtractor: $config->getResponseMemoryExtractor(),
+            responseMetricsExtractor: $config->getResponseMetricsExtractor(),
         );
     }
 
@@ -774,6 +803,45 @@ final class BenchmarkRunner
         ];
     }
 
+    /**
+     * @param list<array<string, array{samples:int, average:float, minimum:float, maximum:float}>> $measurements
+     * @return array<string, array{samples:int, average:float, minimum:float, maximum:float}>
+     */
+    private static function combineRemoteMetrics(array $measurements): array
+    {
+        $combined = [];
+        foreach ($measurements as $measurement) {
+            foreach ($measurement as $name => $metric) {
+                $samples = (int) ($metric['samples'] ?? 0);
+                if ($samples < 1) {
+                    continue;
+                }
+                $combined[$name]['samples'] = ($combined[$name]['samples'] ?? 0) + $samples;
+                $combined[$name]['total'] = ($combined[$name]['total'] ?? 0.0)
+                    + ((float) $metric['average'] * $samples);
+                $combined[$name]['minimum'] = isset($combined[$name]['minimum'])
+                    ? min($combined[$name]['minimum'], (float) $metric['minimum'])
+                    : (float) $metric['minimum'];
+                $combined[$name]['maximum'] = isset($combined[$name]['maximum'])
+                    ? max($combined[$name]['maximum'], (float) $metric['maximum'])
+                    : (float) $metric['maximum'];
+            }
+        }
+
+        $result = [];
+        foreach ($combined as $name => $metric) {
+            $result[$name] = [
+                'samples' => $metric['samples'],
+                'average' => round($metric['total'] / $metric['samples'], 5),
+                'minimum' => round($metric['minimum'], 5),
+                'maximum' => round($metric['maximum'], 5),
+            ];
+        }
+        ksort($result);
+
+        return $result;
+    }
+
     /** @param list<int|float> $values */
     private static function median(array $values): float
     {
@@ -817,6 +885,8 @@ final class BenchmarkRunner
             'customCurlOptions' => array_keys($config->getCurlOptions()),
             'responseValidation' => true,
             'responseMemoryExtraction' => $config->getResponseMemoryExtractor() !== null,
+            'responseMetricsExtraction' => $config->getResponseMetricsExtractor() !== null,
+            'loadGenerator' => 'php-curl-multi',
             'phpVersion' => PHP_VERSION,
             'phpSapi' => PHP_SAPI,
             'memoryLimit' => ini_get('memory_limit'),
@@ -840,6 +910,7 @@ final class BenchmarkRunner
         $concurrentReliabilityRows = [];
         $curveRows = [];
         $resourceRows = [];
+        $remoteMetricRows = [];
         foreach ($data as $name => $result) {
             $stable = $result['stable'];
             $peak = $result['peak'];
@@ -876,7 +947,7 @@ final class BenchmarkRunner
                 $concurrentReliabilityRows[$concurrency][$name] = self::reliabilityRow($name, $metrics);
             }
 
-            if ($result['container'] !== []) {
+            if ($result['container'] !== [] || $result['remoteMemoryMB'] !== null) {
                 $resourceRows[] = [
                     $name,
                     $result['container']['samples'] ?? 0,
@@ -887,10 +958,54 @@ final class BenchmarkRunner
                     self::displayNumber($result['remoteMemoryMB'], 2),
                 ];
             }
+            foreach ($result['remoteMetrics'] ?? [] as $metric => $values) {
+                $remoteMetricRows[] = [
+                    $name,
+                    self::humanize($metric),
+                    $values['samples'],
+                    self::displayNumber($values['average'], 5),
+                    self::displayNumber($values['minimum'], 5),
+                    self::displayNumber($values['maximum'], 5),
+                ];
+            }
+        }
+
+        $peakBaseline = self::minimumPositive(array_map(
+            static fn(array $result): mixed => $result['peak']['req_per_min'] ?? null,
+            $data,
+        ));
+        $memoryBaseline = self::minimumPositive(array_map(
+            static fn(array $result): mixed => $result['remoteMemoryMB'] ?? null,
+            $data,
+        ));
+        $executionBaseline = self::minimumPositive(array_map(
+            static fn(array $result): mixed => $result['remoteMetrics']['server_execution_ms']['average'] ?? null,
+            $data,
+        ));
+        $filesBaseline = self::minimumPositive(array_map(
+            static fn(array $result): mixed => $result['remoteMetrics']['included_files']['average'] ?? null,
+            $data,
+        ));
+        $relativeRows = [];
+        foreach ($data as $name => $result) {
+            $relativeRows[] = [
+                $name,
+                self::displayMultiple($result['peak']['req_per_min'] ?? null, $peakBaseline),
+                self::displayMultiple($result['remoteMemoryMB'] ?? null, $memoryBaseline),
+                self::displayMultiple(
+                    $result['remoteMetrics']['server_execution_ms']['average'] ?? null,
+                    $executionBaseline,
+                ),
+                self::displayMultiple(
+                    $result['remoteMetrics']['included_files']['average'] ?? null,
+                    $filesBaseline,
+                ),
+            ];
         }
 
         [$commonConfiguration, $targetConfiguration] = self::groupConfiguration($data);
         $environmentKeys = [
+            'loadGenerator',
             'phpVersion',
             'phpSapi',
             'memoryLimit',
@@ -1025,10 +1140,22 @@ final class BenchmarkRunner
                 array_values($rows),
             );
         }
+        if ($relativeRows !== []) {
+            $sections[] = self::markdownTable('Relative comparison',
+                ['Target', 'Peak throughput', 'Remote memory', 'Server time', 'Included files'],
+                $relativeRows,
+            );
+        }
         if ($resourceRows !== []) {
-            $sections[] = self::markdownTable('Container resources',
+            $sections[] = self::markdownTable('Resource telemetry',
                 ['Target', 'Samples', 'Avg CPU', 'Peak CPU', 'Avg MB', 'Peak MB', 'Remote MB'],
                 $resourceRows,
+            );
+        }
+        if ($remoteMetricRows !== []) {
+            $sections[] = self::markdownTable('Server response telemetry',
+                ['Target', 'Metric', 'Samples', 'Average', 'Minimum', 'Maximum'],
+                $remoteMetricRows,
             );
         }
         if ($commonRows !== []) {
@@ -1193,6 +1320,26 @@ final class BenchmarkRunner
         return is_numeric($value) ? number_format((float) $value, $decimals, '.', ',') : '—';
     }
 
+    /** @param array<int|string, mixed> $values */
+    private static function minimumPositive(array $values): ?float
+    {
+        $positive = array_values(array_filter(
+            $values,
+            static fn(mixed $value): bool => is_numeric($value) && (float) $value > 0,
+        ));
+
+        return $positive === [] ? null : (float) min($positive);
+    }
+
+    private static function displayMultiple(mixed $value, ?float $baseline): string
+    {
+        if (!is_numeric($value) || $baseline === null || $baseline <= 0) {
+            return '—';
+        }
+
+        return number_format((float) $value / $baseline, 2, '.', ',') . '×';
+    }
+
     private static function displayPercent(mixed $value): string
     {
         return is_numeric($value) ? self::displayNumber($value, 2) . '%' : '—';
@@ -1210,7 +1357,8 @@ final class BenchmarkRunner
 
     private static function humanize(string $key): string
     {
-        $words = preg_replace('/(?<!^)[A-Z]/', ' $0', $key) ?? $key;
+        $words = str_replace('_', ' ', $key);
+        $words = preg_replace('/(?<!^)[A-Z]/', ' $0', $words) ?? $words;
         return ucfirst(strtolower($words));
     }
 
@@ -1262,6 +1410,11 @@ final class BenchmarkRunner
             }
             foreach ($result['container'] as $key => $value) {
                 $metrics["container.{$key}"] = $value;
+            }
+            foreach ($result['remoteMetrics'] ?? [] as $metric => $values) {
+                foreach ($values as $key => $value) {
+                    $metrics["remoteMetrics.{$metric}.{$key}"] = $value;
+                }
             }
             foreach ($result['configuration'] as $key => $value) {
                 $metrics["configuration.{$key}"] = is_array($value) ? implode(',', $value) : $value;

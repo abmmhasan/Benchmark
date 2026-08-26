@@ -15,6 +15,9 @@ final class RequestBenchmark
     private float $remoteMemoryTotal = 0.0;
     private int $remoteMemorySamples = 0;
 
+    /** @var array<string, list<float>> */
+    private array $remoteMetrics = [];
+
     private readonly ?Closure $progress;
 
     public function __construct(
@@ -51,6 +54,7 @@ final class RequestBenchmark
             'multiple' => $multiple,
             'totalDuration' => self::secondsSince($startedAt),
             'remoteMemoryMB' => $this->getRemoteMemoryMB(),
+            'remoteMetrics' => $this->getRemoteMetrics(),
         ];
     }
 
@@ -161,6 +165,7 @@ final class RequestBenchmark
     {
         $this->remoteMemoryTotal = 0.0;
         $this->remoteMemorySamples = 0;
+        $this->remoteMetrics = [];
     }
 
     public function getRemoteMemoryMB(): ?float
@@ -170,6 +175,28 @@ final class RequestBenchmark
         }
 
         return round(($this->remoteMemoryTotal / $this->remoteMemorySamples) / 1_048_576, 2);
+    }
+
+    /**
+     * @return array<string, array{samples:int, average:float, minimum:float, maximum:float}>
+     */
+    public function getRemoteMetrics(): array
+    {
+        $metrics = [];
+        foreach ($this->remoteMetrics as $name => $values) {
+            if ($values === []) {
+                continue;
+            }
+            $metrics[$name] = [
+                'samples' => count($values),
+                'average' => round(array_sum($values) / count($values), 5),
+                'minimum' => round(min($values), 5),
+                'maximum' => round(max($values), 5),
+            ];
+        }
+        ksort($metrics);
+
+        return $metrics;
     }
 
     public function runSingleThreaded(): array
@@ -205,7 +232,7 @@ final class RequestBenchmark
                     $latencies[] = $elapsed;
                     $connectTotal += (float) ($info['connect_time'] ?? 0.0);
                     $ttfbTotal += (float) ($info['starttransfer_time'] ?? 0.0);
-                    $this->captureRemoteMemory($response, $info);
+                    $this->captureRemoteMeasurements($response, $info);
                 }
 
                 $completed = $i + 1;
@@ -309,7 +336,7 @@ final class RequestBenchmark
                         $latencies[] = (float) ($info['total_time'] ?? 0.0);
                         $connectTotal += (float) ($info['connect_time'] ?? 0.0);
                         $ttfbTotal += (float) ($info['starttransfer_time'] ?? 0.0);
-                        $this->captureRemoteMemory($response, $info);
+                        $this->captureRemoteMeasurements($response, $info);
                     }
 
                     $completedRequests = $counters['attempted_requests'];
@@ -459,21 +486,48 @@ final class RequestBenchmark
     }
 
     /** @param array<string, mixed> $info */
-    private function captureRemoteMemory(string|false $response, array $info): void
+    private function captureRemoteMeasurements(string|false $response, array $info): void
     {
-        $extractor = $this->config->getResponseMemoryExtractor();
-        if (!is_string($response) || $extractor === null) {
+        if (!is_string($response)) {
+            return;
+        }
+
+        $memoryExtractor = $this->config->getResponseMemoryExtractor();
+        if ($memoryExtractor !== null) {
+            try {
+                $memory = $memoryExtractor($response, $info);
+                if (is_int($memory) || is_float($memory)) {
+                    if (is_finite((float) $memory) && $memory >= 0) {
+                        $this->remoteMemoryTotal += (float) $memory;
+                        ++$this->remoteMemorySamples;
+                    }
+                }
+            } catch (Throwable) {
+                // Optional telemetry must not change response correctness.
+            }
+        }
+
+        $metricsExtractor = $this->config->getResponseMetricsExtractor();
+        if ($metricsExtractor === null) {
             return;
         }
 
         try {
-            $memory = $extractor($response, $info);
-            if (is_int($memory) || is_float($memory)) {
-                if (!is_finite((float) $memory) || $memory < 0) {
-                    return;
+            $metrics = $metricsExtractor($response, $info);
+            if (!is_array($metrics)) {
+                return;
+            }
+            foreach ($metrics as $name => $value) {
+                if (
+                    !is_string($name)
+                    || preg_match('/^[a-z][a-z0-9_]{0,63}$/', $name) !== 1
+                    || (!is_int($value) && !is_float($value))
+                    || !is_finite((float) $value)
+                    || $value < 0
+                ) {
+                    continue;
                 }
-                $this->remoteMemoryTotal += (float) $memory;
-                ++$this->remoteMemorySamples;
+                $this->remoteMetrics[$name][] = (float) $value;
             }
         } catch (Throwable) {
             // Optional telemetry must not change response correctness.

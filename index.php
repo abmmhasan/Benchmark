@@ -95,7 +95,8 @@ $runner = BenchmarkRunner::make()
     ->timeout(2)
     ->enableHttp2(false)
     ->verifySsl(false)
-    ->addConfigs($raw, $laravel, $webrick, $infbyte)
+    // ->addConfigs($raw, $laravel, $webrick, $infbyte)
+    ->addConfigs($raw, $laravel, $infbyte)
     ->sampleEvery(1.0);
 
 /* ------------------------------------------------------------------ *
