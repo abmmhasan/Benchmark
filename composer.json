@@ -50,7 +50,10 @@
     "test": "@php tests/run.php",
     "bench": "phpbench run --report=aggregate",
     "bench:quick": "phpbench run --report=aggregate --iterations=3 --revs=100",
-    "benchmark:frameworks": "@php bin/framework-benchmark",
+    "benchmark:frameworks": [
+      "Composer\\Config::disableProcessTimeout",
+      "@php bin/framework-benchmark"
+    ],
     "check": [
       "@lint",
       "@test"

@@ -93,6 +93,8 @@ composer benchmark:frameworks -- docker-stop
 composer benchmark:frameworks -- clean --force
 ```
 
+### Manual targets
+
 Start by inspecting the environment and validating target responses:
 
 ```bash
@@ -132,6 +134,11 @@ Results are printed as Markdown and archived under `.benchmark-output/<UTC time>
 as canonical `results.json`, `report.md`, and a dependency-free
 `dashboard.html`. The history root also gets an `index.html` linking all runs.
 Pass `--no-archive` to disable files.
+
+The `Framework benchmarks` GitHub Actions workflow runs weekly, on pushes to
+`main`, or manually. It commits reports to `docs/` and deploys that folder to
+GitHub Pages. Set the repository's Pages source to **GitHub Actions** once before
+the first deployment.
 
 ### Framework lifecycle and runtime preparation
 

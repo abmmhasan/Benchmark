@@ -1,0 +1,98 @@
+name: Framework benchmarks
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+  schedule:
+    - cron: '17 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: framework-benchmarks
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Benchmark and publish reports
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: curl, intl, mbstring, pdo_sqlite, sqlite3, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Install benchmark dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Generate latest framework applications
+        run: composer benchmark:frameworks -- setup --force
+
+      - name: Start benchmark server
+        run: composer benchmark:frameworks -- docker
+
+      - name: Validate framework targets
+        run: composer benchmark:frameworks -- check
+
+      - name: Run framework benchmarks
+        run: composer benchmark:frameworks -- run --output=docs
+
+      - name: Stop benchmark server
+        if: always()
+        run: |
+          if [[ -f frameworks/.benchmark-server.json ]]; then
+            composer benchmark:frameworks -- docker-stop
+          fi
+
+      - name: Commit generated reports
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f docs
+
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+
+          git commit -m 'docs: update framework benchmark reports'
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs
+
+  deploy:
+    name: Deploy GitHub Pages
+    needs: benchmark
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
