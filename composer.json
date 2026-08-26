@@ -17,7 +17,49 @@
   "minimum-stability": "dev",
   "prefer-stable": true,
   "require": {
-    "php": ">=8.0",
-    "ext-curl": "*"
+    "php": ">=8.4",
+    "ext-curl": "*",
+    "nunomaduro/termwind": "^2.4"
+  },
+  "scripts": {
+    "lint": [
+      "@php -l index.php",
+      "@php -l src/BenchmarkConfig.php",
+      "@php -l src/BenchmarkConsole.php",
+      "@php -l src/BenchmarkDashboard.php",
+      "@php -l src/BenchmarkHistory.php",
+      "@php -l src/BenchmarkRunner.php",
+      "@php -l src/ContainerStats.php",
+      "@php -l src/HttpMethod.php",
+      "@php -l src/PipingMode.php",
+      "@php -l src/PhpFrameworksBenchSuite.php",
+      "@php -l src/PhpFrameworksBenchManager.php",
+      "@php -l src/RequestBenchmark.php",
+      "@php -l src/UnitBenchmark.php",
+      "@php -l benchmarks/ComponentBench.php",
+      "@php -l tests/run.php",
+      "@php -l bin/framework-benchmark",
+      "@lint:frameworks"
+    ],
+    "lint:frameworks": [
+      "find frameworks/libs -type f -name '*.php' -exec php -l {} \\;",
+      "find frameworks -path '*/_benchmark/*' -type f -name '*.php' -exec php -l {} \\;",
+      "find frameworks -path '*/_benchmark/*' -type f -name '*.sh' -exec bash -n {} \\;",
+      "bash -n frameworks/_support/lifecycle.sh"
+    ],
+    "test": "@php tests/run.php",
+    "bench": "phpbench run --report=aggregate",
+    "bench:quick": "phpbench run --report=aggregate --iterations=3 --revs=100",
+    "benchmark:frameworks": [
+      "Composer\\Config::disableProcessTimeout",
+      "@php bin/framework-benchmark"
+    ],
+    "check": [
+      "@lint",
+      "@test"
+    ]
+  },
+  "require-dev": {
+    "phpbench/phpbench": "^1.7"
   }
 }

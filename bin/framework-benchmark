@@ -1,0 +1,498 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use AbmmHasan\Benchmark\BenchmarkConfig;
+use AbmmHasan\Benchmark\BenchmarkHistory;
+use AbmmHasan\Benchmark\BenchmarkRunner;
+use AbmmHasan\Benchmark\PhpFrameworksBenchManager;
+use AbmmHasan\Benchmark\PhpFrameworksBenchSuite;
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+const HELP = <<<'TEXT'
+Self-contained PHP framework workflow powered by Benchmark's native PHP/libcurl engine.
+
+Usage:
+  php bin/framework-benchmark [run] [options]
+  php bin/framework-benchmark <command> [options]
+
+Commands:
+  run                 Validate and benchmark framework targets (default)
+  doctor              Inspect tools, server configuration, fixtures, and lifecycle support
+  check               Validate every selected framework response and telemetry
+  setup               Install selected framework fixtures; requires --force
+  update              Recreate selected fixtures from the latest release; requires --force
+  clean               Remove installed fixture files; requires --force
+  clear-cache         Clear selected framework caches
+  restart             Restart services selected with --service
+  reset-opcache       Reset the web server's OPCache through the fixture endpoint
+  disable-fastcgi     Add fastcgi_finish_request to disable_functions; requires --force
+  docker              Build and start the suite's Apache container
+  docker-stop         Stop and remove the suite's Apache container
+  list                List archived benchmark runs, newest first
+  compare             Compare --current with --baseline
+  dashboard           Regenerate and print the dashboard path for --run
+  delete              Delete one archived --run; requires --force
+  delete-all          Delete every archived run; requires --force
+  help                Show this help
+
+Common options:
+  --suite=PATH          Framework suite directory (default: ./frameworks)
+  --base-url=URL        Override the base URL read from suite config
+  --target=NAMES        Comma-separated framework names; defaults to all
+  --output=PATH         History root (default: .benchmark-output)
+  --dry-run             Print planned lifecycle/system commands without executing them
+  --force               Confirm setup, update, clean, php.ini, or history replacement
+
+Run options:
+  --connections=N       Maximum concurrency; defaults to suite connections
+  --concurrency=LEVELS  Comma-separated concurrency curve; defaults automatically
+  --count=N             Minimum requests per phase (default: 5000)
+  --duration=SECONDS    Minimum phase duration; defaults to suite duration
+  --repetitions=N       Repetitions from 1 to 3 (default: 3)
+  --stability=PERCENT   Maximum stable RPM spread (default: 5)
+  --timeout=SECONDS     Per-request timeout (default: 10)
+  --warm-up=N           Warm-up requests per repetition (default: 10)
+  --fresh               Clean and set up targets before benchmarking; requires --force
+  --clear-cache         Clear each target cache before every repetition
+  --service=NAMES       Restart apache, nginx, and/or php-fpm before every repetition
+  --reset-opcache       Reset OPCache before every repetition
+  --no-archive          Print the report without archiving JSON, Markdown, and HTML
+  --insecure            Disable TLS certificate verification
+  --http2               Use HTTP/2
+
+History options:
+  --run=ID              Run index (0 is newest) or timestamp identifier
+  --current=ID          Current run for comparison (default: 0)
+  --baseline=ID         Baseline run for comparison (default: 1)
+
+Docker options:
+  --port=N              Fixed Apache port; omitted chooses a free port automatically
+  --name=NAME           Container name (default: benchmark-frameworks-apache)
+TEXT;
+
+/** @return never */
+function fail(string $message, bool $showHelp = false): void
+{
+    fwrite(STDERR, "Error: {$message}\n" . ($showHelp ? "\n" . HELP . "\n" : ''));
+    exit(1);
+}
+
+/** @return array{0:string, 1:array<string, string|bool|list<string>>} */
+function parseArguments(array $arguments): array
+{
+    $command = 'run';
+    if (isset($arguments[0]) && !str_starts_with($arguments[0], '--')) {
+        $command = array_shift($arguments);
+    }
+
+    $options = [];
+    foreach ($arguments as $argument) {
+        if (!str_starts_with($argument, '--')) {
+            fail("Unexpected positional argument: {$argument}", true);
+        }
+        $option = substr($argument, 2);
+        if ($option === '') {
+            continue;
+        }
+        if (str_contains($option, '=')) {
+            [$name, $value] = explode('=', $option, 2);
+            if ($name === '' || $value === '') {
+                fail("Invalid option: {$argument}", true);
+            }
+            if (isset($options[$name])) {
+                $existing = is_array($options[$name]) ? $options[$name] : [$options[$name]];
+                $existing[] = $value;
+                $options[$name] = $existing;
+            } else {
+                $options[$name] = $value;
+            }
+        } else {
+            $options[$option] = true;
+        }
+    }
+
+    return [$command, $options];
+}
+
+/** @param array<string, mixed> $options */
+function stringOption(array $options, string $name, ?string $default = null): ?string
+{
+    if (!array_key_exists($name, $options)) {
+        return $default;
+    }
+    if (!is_string($options[$name])) {
+        fail("--{$name} requires one value");
+    }
+    return $options[$name];
+}
+
+/** @param array<string, mixed> $options */
+function integerOption(array $options, string $name, int $default, int $minimum, int $maximum): int
+{
+    $raw = stringOption($options, $name);
+    if ($raw === null) {
+        return $default;
+    }
+    $value = filter_var($raw, FILTER_VALIDATE_INT);
+    if (!is_int($value) || $value < $minimum || $value > $maximum) {
+        fail("--{$name} must be between {$minimum} and {$maximum}");
+    }
+    return $value;
+}
+
+/** @param array<string, mixed> $options */
+function floatOption(array $options, string $name, float $default, float $minimum, float $maximum): float
+{
+    $raw = stringOption($options, $name);
+    if ($raw === null) {
+        return $default;
+    }
+    $value = filter_var($raw, FILTER_VALIDATE_FLOAT);
+    if (!is_float($value) || !is_finite($value) || $value < $minimum || $value > $maximum) {
+        fail("--{$name} must be between {$minimum} and {$maximum}");
+    }
+    return $value;
+}
+
+/** @return list<string> */
+function listOption(mixed $value): array
+{
+    if ($value === null || $value === false || $value === '') {
+        return [];
+    }
+    $values = is_array($value) ? $value : [$value];
+    $items = [];
+    foreach ($values as $entry) {
+        if (!is_string($entry)) {
+            fail('List options require text values');
+        }
+        foreach (explode(',', $entry) as $item) {
+            $item = trim($item);
+            if ($item !== '') {
+                $items[] = $item;
+            }
+        }
+    }
+    return $items;
+}
+
+/** @param array<string, mixed> $options */
+function flag(array $options, string $name): bool
+{
+    return ($options[$name] ?? false) === true;
+}
+
+/** @param array<string, mixed> $value */
+function printJson(array $value): void
+{
+    fwrite(STDOUT, json_encode(
+        $value,
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+    ) . "\n");
+}
+
+/** @param list<array<string, mixed>> $results */
+function printOperations(array $results): void
+{
+    foreach ($results as $result) {
+        $subject = $result['target'] ?? $result['service'] ?? 'system';
+        $status = $result['status'] ?? (($result['exitCode'] ?? 1) === 0 ? 'completed' : 'failed');
+        $command = implode(' ', array_map('escapeshellarg', $result['command'] ?? []));
+        fwrite(STDOUT, sprintf("%-20s %-12s %s\n", $subject, $status, $command));
+    }
+}
+
+/** @param array<string, mixed> $options */
+function suite(array $options): PhpFrameworksBenchSuite
+{
+    $path = stringOption($options, 'suite', dirname(__DIR__) . '/frameworks');
+    $baseUrl = stringOption($options, 'base-url');
+    return new PhpFrameworksBenchSuite((string) $path, $baseUrl);
+}
+
+/** @param array<string, mixed> $options */
+function history(array $options): BenchmarkHistory
+{
+    return new BenchmarkHistory((string) stringOption($options, 'output', '.benchmark-output'));
+}
+
+/** @return string|int */
+function historyIdentifier(array $options, string $name, string|int $default): string|int
+{
+    $value = stringOption($options, $name);
+    return $value === null ? $default : $value;
+}
+
+[$command, $options] = parseArguments(array_slice($argv, 1));
+if ($command === 'help' || flag($options, 'help')) {
+    fwrite(STDOUT, HELP . "\n");
+    exit(0);
+}
+
+$knownCommands = [
+    'run', 'doctor', 'check', 'setup', 'update', 'clean', 'clear-cache', 'restart',
+    'reset-opcache', 'disable-fastcgi', 'docker', 'docker-stop', 'list', 'compare', 'dashboard',
+    'delete', 'delete-all',
+];
+if (!in_array($command, $knownCommands, true)) {
+    fail("Unknown command: {$command}", true);
+}
+
+try {
+    if ($command === 'list') {
+        $entries = history($options)->entries();
+        fwrite(STDOUT, "Index  Recorded at                Targets  Identifier\n");
+        foreach ($entries as $index => $entry) {
+            fwrite(STDOUT, sprintf(
+                "%-6d %-26s %-8d %s\n",
+                $index,
+                $entry['recordedAt'],
+                $entry['targets'],
+                $entry['id'],
+            ));
+        }
+        exit(0);
+    }
+
+    if ($command === 'compare') {
+        fwrite(STDOUT, history($options)->compare(
+            historyIdentifier($options, 'current', 0),
+            historyIdentifier($options, 'baseline', 1),
+        ));
+        exit(0);
+    }
+
+    if ($command === 'dashboard') {
+        $file = history($options)->dashboard(historyIdentifier($options, 'run', 0));
+        fwrite(STDOUT, $file . "\n");
+        exit(0);
+    }
+
+    if ($command === 'delete') {
+        $directory = history($options)->delete(
+            historyIdentifier($options, 'run', 0),
+            flag($options, 'force'),
+        );
+        fwrite(STDOUT, "Deleted {$directory}\n");
+        exit(0);
+    }
+
+    if ($command === 'delete-all') {
+        foreach (history($options)->deleteAll(flag($options, 'force')) as $directory) {
+            fwrite(STDOUT, "Deleted {$directory}\n");
+        }
+        exit(0);
+    }
+
+    $suite = suite($options);
+    $manager = new PhpFrameworksBenchManager($suite);
+    $targets = listOption($options['target'] ?? null);
+    $dryRun = flag($options, 'dry-run');
+    $force = flag($options, 'force');
+    $stream = static function (string $chunk): void {
+        fwrite(STDERR, $chunk);
+    };
+
+    if ($command === 'doctor') {
+        printJson($manager->doctor($targets));
+        exit(0);
+    }
+
+    if ($command === 'check') {
+        $checks = $manager->checkTargets($targets);
+        fwrite(STDOUT, "| Target | HTTP | Valid | Memory bytes | Server ms | Included files | URL |\n");
+        fwrite(STDOUT, "| --- | ---: | --- | ---: | ---: | ---: | --- |\n");
+        $failed = false;
+        foreach ($checks as $target => $check) {
+            $failed = $failed || !$check['valid'];
+            fwrite(STDOUT, sprintf(
+                "| %s | %d | %s | %s | %s | %s | %s |\n",
+                $target,
+                $check['status'],
+                $check['valid'] ? 'yes' : 'no',
+                $check['memoryBytes'] ?? '—',
+                $check['metrics']['server_execution_ms'] ?? '—',
+                $check['metrics']['included_files'] ?? '—',
+                $check['url'],
+            ));
+        }
+        exit($failed ? 1 : 0);
+    }
+
+    if (in_array($command, ['setup', 'update', 'clean', 'clear-cache'], true)) {
+        printOperations($manager->lifecycle($command, $targets, $dryRun, $force, $stream));
+        exit(0);
+    }
+
+    if ($command === 'restart') {
+        $services = listOption($options['service'] ?? null);
+        if ($services === []) {
+            fail('restart requires --service=apache,nginx,php-fpm');
+        }
+        printOperations($manager->restartServices($services, $dryRun, $stream));
+        exit(0);
+    }
+
+    if ($command === 'reset-opcache') {
+        printJson($manager->resetOpcache($dryRun));
+        exit(0);
+    }
+
+    if ($command === 'disable-fastcgi') {
+        printJson($manager->disableFastcgiFinishRequest($dryRun, $force));
+        if (!$dryRun) {
+            fwrite(STDERR, "Restart php-fpm after modifying php.ini.\n");
+        }
+        exit(0);
+    }
+
+    if ($command === 'docker') {
+        $requestedPort = stringOption($options, 'port') === null
+            ? null
+            : integerOption($options, 'port', 1, 1, 65_535);
+        printOperations($manager->dockerApache(
+            $requestedPort,
+            (string) stringOption($options, 'name', 'benchmark-frameworks-apache'),
+            $dryRun,
+            $stream,
+        ));
+        exit(0);
+    }
+
+    if ($command === 'docker-stop') {
+        printOperations([$manager->stopDockerApache(
+            stringOption($options, 'name'),
+            $dryRun,
+            $stream,
+        )]);
+        exit(0);
+    }
+
+    if (flag($options, 'fresh')) {
+        if (!$force && !$dryRun) {
+            fail('--fresh requires --force because installed fixture files are replaced');
+        }
+        printOperations($manager->lifecycle('clean', $targets, $dryRun, $force, $stream));
+        printOperations($manager->lifecycle('setup', $targets, $dryRun, $force, $stream));
+    }
+
+    $configs = $suite->configs($targets);
+    $connections = integerOption(
+        $options,
+        'connections',
+        $suite->getSuggestedConcurrency(),
+        2,
+        BenchmarkConfig::MAX_THREADS,
+    );
+    $count = integerOption($options, 'count', 5_000, 100, BenchmarkConfig::MAX_COUNT);
+    if ($count < $connections) {
+        fail('--count must be greater than or equal to --connections');
+    }
+    $duration = floatOption(
+        $options,
+        'duration',
+        (float) $suite->getSuggestedDuration(),
+        0.0,
+        (float) BenchmarkConfig::MAX_PHASE_DURATION_SECONDS,
+    );
+    $repetitions = integerOption($options, 'repetitions', 3, 1, 3);
+    $stability = floatOption($options, 'stability', 5.0, 0.0, 10_000.0);
+    $timeout = integerOption($options, 'timeout', 10, 1, BenchmarkConfig::MAX_TIMEOUT_SECONDS);
+    $warmUp = integerOption($options, 'warm-up', 10, 0, 10_000);
+    $levels = [];
+    foreach (listOption($options['concurrency'] ?? null) as $level) {
+        $parsed = filter_var($level, FILTER_VALIDATE_INT);
+        if (!is_int($parsed) || $parsed < 2 || $parsed > $connections) {
+            fail("Every --concurrency level must be between 2 and {$connections}");
+        }
+        $levels[] = $parsed;
+    }
+    if (count(array_unique($levels)) !== count($levels)) {
+        fail('--concurrency levels must be unique');
+    }
+
+    $services = listOption($options['service'] ?? null);
+    $clearCache = flag($options, 'clear-cache');
+    $resetOpcache = flag($options, 'reset-opcache');
+    $beforeRepetition = ($services !== [] || $clearCache || $resetOpcache)
+        ? static function (BenchmarkConfig $config, int $run) use (
+            $manager,
+            $services,
+            $clearCache,
+            $resetOpcache,
+            $dryRun,
+            $stream,
+        ): void {
+            fwrite(STDERR, sprintf("Preparing %s repetition %d\n", $config->getName(), $run));
+            if ($clearCache) {
+                $manager->lifecycle('clear-cache', [$config->getName()], $dryRun, false, $stream);
+            }
+            if ($services !== []) {
+                $manager->restartServices($services, $dryRun, $stream);
+            }
+            if ($resetOpcache) {
+                $manager->resetOpcache($dryRun);
+            }
+        }
+        : null;
+
+    $runner = BenchmarkRunner::make()
+        ->threads($connections)
+        ->count($count)
+        ->minimumDuration($duration)
+        ->timeout($timeout)
+        ->repetitions($repetitions)
+        ->stabilityThreshold($stability)
+        ->warmUpRequests($warmUp)
+        ->enableHttp2(flag($options, 'http2'))
+        ->verifySsl(!flag($options, 'insecure'))
+        ->beforeRepetition($beforeRepetition)
+        ->addConfigs(...$configs);
+    if ($levels !== []) {
+        $runner->concurrencyLevels(...$levels);
+    }
+
+    $results = $runner->runAll();
+    if (!is_array($results)) {
+        throw new RuntimeException('Benchmark runner returned an unexpected result type');
+    }
+    $markdown = $runner->formatResults($results, 'table');
+    if (!is_string($markdown)) {
+        throw new RuntimeException('Unable to render Markdown report');
+    }
+
+    if (!flag($options, 'no-archive')) {
+        $payload = [
+            'schemaVersion' => 2,
+            'loadGenerator' => 'php-curl-multi',
+            'suiteDirectory' => $suite->getProjectDirectory(),
+            'baseUrl' => $suite->getBaseUrl(),
+            'targets' => array_map(static fn(BenchmarkConfig $config): string => $config->getName(), $configs),
+            'invocation' => [
+                'connections' => $connections,
+                'concurrencyLevels' => $levels,
+                'count' => $count,
+                'minimumDurationSeconds' => $duration,
+                'repetitions' => $repetitions,
+                'stabilityThresholdPercent' => $stability,
+                'timeoutSeconds' => $timeout,
+                'warmUpRequests' => $warmUp,
+                'services' => $services,
+                'clearCache' => $clearCache,
+                'resetOpcache' => $resetOpcache,
+                'http2' => flag($options, 'http2'),
+                'verifySsl' => !flag($options, 'insecure'),
+            ],
+            'results' => $results,
+        ];
+        $directory = history($options)->save($payload, $markdown);
+        fwrite(STDERR, "Results archived in {$directory}\n");
+    }
+
+    fwrite(STDOUT, $markdown);
+} catch (Throwable $exception) {
+    fail($exception->getMessage());
+}

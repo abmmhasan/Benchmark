@@ -1,0 +1,12 @@
+{
+  "$schema": "./vendor/phpbench/phpbench/phpbench.schema.json",
+  "runner.bootstrap": "vendor/autoload.php",
+  "runner.path": "benchmarks",
+  "runner.iterations": 5,
+  "runner.revs": 1000,
+  "runner.warmup": 2,
+  "runner.retry_threshold": 5,
+  "runner.output_mode": "throughput",
+  "runner.time_unit": "seconds",
+  "runner.progress": "classdots"
+}

@@ -1,4 +1,12 @@
 /vendor/
+/frameworks/.benchmark-server.json
+/.phpbench/
 .idea
 example.php
 composer.lock
+*.md
+!README.md
+!/docs/**/*.md
+*.log
+*.pdf
+docs.txt
