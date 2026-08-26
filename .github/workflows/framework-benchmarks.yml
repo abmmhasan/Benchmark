@@ -1,11 +1,6 @@
 name: Framework benchmarks
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
   schedule:
     - cron: '17 2 * * 1'
   workflow_dispatch:

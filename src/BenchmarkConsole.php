@@ -15,6 +15,8 @@ use function Termwind\renderUsing;
 /** Renders benchmark progress exclusively to STDERR. */
 final class BenchmarkConsole
 {
+    private const NON_INTERACTIVE_PROGRESS_INTERVAL_NS = 15_000_000_000;
+
     private readonly StreamOutput $output;
     private readonly bool $interactive;
     /** @var list<ConsoleSectionOutput> */
@@ -22,6 +24,7 @@ final class BenchmarkConsole
     /** @var array<string, ConsoleSectionOutput> */
     private array $sections = [];
     private ?string $target = null;
+    private ?int $lastProgressOutputAt = null;
 
     public function __construct()
     {
@@ -87,6 +90,8 @@ final class BenchmarkConsole
     {
         $this->target = $target;
         if (!$this->interactive) {
+            // Let the first real update report the correct accumulated fraction.
+            $this->lastProgressOutputAt = null;
             return;
         }
 
@@ -107,11 +112,29 @@ final class BenchmarkConsole
 
     public function updateTarget(float $fraction, string $message): void
     {
-        if (!$this->interactive || $this->target === null || !isset($this->sections[$this->target])) {
+        if ($this->target === null) {
             return;
         }
 
-        $this->sections[$this->target]->overwrite(self::progressLine($this->target, $fraction, $message));
+        if ($this->interactive) {
+            if (isset($this->sections[$this->target])) {
+                $this->sections[$this->target]->overwrite(
+                    self::progressLine($this->target, $fraction, $message),
+                );
+            }
+            return;
+        }
+
+        $now = hrtime(true);
+        if (
+            $this->lastProgressOutputAt !== null
+            && $now - $this->lastProgressOutputAt < self::NON_INTERACTIVE_PROGRESS_INTERVAL_NS
+        ) {
+            return;
+        }
+
+        $this->output->writeln(self::progressLine($this->target, $fraction, $message));
+        $this->lastProgressOutputAt = $now;
     }
 
     public function pauseTarget(int $run, int $repetitions, float $fraction): void
@@ -124,8 +147,15 @@ final class BenchmarkConsole
                     sprintf('<fg=yellow>waiting · repetition %d/%d complete</>', $run, $repetitions),
                 ),
             );
+        } elseif ($this->target !== null) {
+            $this->output->writeln(self::progressLine(
+                $this->target,
+                $fraction,
+                sprintf('repetition %d/%d complete', $run, $repetitions),
+            ));
         }
         $this->target = null;
+        $this->lastProgressOutputAt = null;
     }
 
     public function finishTarget(
@@ -159,6 +189,7 @@ final class BenchmarkConsole
 
         unset($this->sections[(string) $this->target]);
         $this->target = null;
+        $this->lastProgressOutputAt = null;
     }
 
     public function failTarget(string $message): void
@@ -182,6 +213,7 @@ final class BenchmarkConsole
 
         unset($this->sections[(string) $this->target]);
         $this->target = null;
+        $this->lastProgressOutputAt = null;
     }
 
     public function finishSuite(int $targets, float $duration): void
