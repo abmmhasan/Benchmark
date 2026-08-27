@@ -482,6 +482,7 @@ try {
             'baseUrl' => $suite->getBaseUrl(),
             'targets' => $targetNames,
             'categories' => $suite->categories($targetNames),
+            'architectures' => $suite->architectures($targetNames),
             'invocation' => [
                 'connections' => $connections,
                 'concurrencyLevels' => $levels,

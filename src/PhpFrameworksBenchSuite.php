@@ -101,6 +101,26 @@ final class PhpFrameworksBenchSuite
      */
     public function categories(array $targets = []): array
     {
+        return $this->classifications('framework_categories', $targets);
+    }
+
+    /**
+     * Return dashboard architecture slugs keyed by target name.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function architectures(array $targets = []): array
+    {
+        return $this->classifications('framework_architectures', $targets);
+    }
+
+    /**
+     * @param list<string> $targets
+     * @return array<string, string>
+     */
+    private function classifications(string $configKey, array $targets): array
+    {
         $available = $this->targets();
         $selected = $targets === [] ? $available : array_values($targets);
         $unknown = array_values(array_diff($selected, $available));
@@ -108,20 +128,21 @@ final class PhpFrameworksBenchSuite
             throw new InvalidArgumentException('Unknown framework target(s): ' . implode(', ', $unknown));
         }
 
-        $categories = array_fill_keys($available, 'uncategorized');
-        if (preg_match('/^framework_categories\s*=\s*"(?<categories>.*?)"\s*$/ms', $this->config, $match) === 1) {
-            $definitions = preg_split('/\s+/', trim($match['categories']), flags: PREG_SPLIT_NO_EMPTY);
+        $classifications = array_fill_keys($available, 'uncategorized');
+        $pattern = '/^' . preg_quote($configKey, '/') . '\s*=\s*"(?<definitions>.*?)"\s*$/ms';
+        if (preg_match($pattern, $this->config, $match) === 1) {
+            $definitions = preg_split('/\s+/', trim($match['definitions']), flags: PREG_SPLIT_NO_EMPTY);
             foreach (is_array($definitions) ? $definitions : [] as $definition) {
-                if (preg_match('/^(?<target>[a-zA-Z0-9][a-zA-Z0-9._-]*):(?<category>[a-z][a-z0-9-]*)$/', $definition, $parts) !== 1) {
-                    throw new RuntimeException("Invalid framework category definition: {$definition}");
+                if (preg_match('/^(?<target>[a-zA-Z0-9][a-zA-Z0-9._-]*):(?<value>[a-z][a-z0-9-]*)$/', $definition, $parts) !== 1) {
+                    throw new RuntimeException("Invalid {$configKey} definition: {$definition}");
                 }
-                if (isset($categories[$parts['target']])) {
-                    $categories[$parts['target']] = $parts['category'];
+                if (isset($classifications[$parts['target']])) {
+                    $classifications[$parts['target']] = $parts['value'];
                 }
             }
         }
 
-        return array_intersect_key($categories, array_flip($selected));
+        return array_intersect_key($classifications, array_flip($selected));
     }
 
     /**
