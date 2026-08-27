@@ -616,7 +616,8 @@ namespace {
         $suiteDirectory . '/config',
         "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
-        . "framework_categories=\"\nalpha:modular\nbeta:micro\n\"\n",
+        . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
+        . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n",
     );
     file_put_contents(
         $suiteDirectory . '/alpha/_benchmark/hello_world.sh',
@@ -636,9 +637,14 @@ namespace {
         $assert($frameworkSuite->getSuggestedConcurrency() === 42, 'suite connection default is imported');
         $assert($frameworkSuite->getSuggestedDuration() === 17, 'suite duration default is imported');
         $assert(
-            $frameworkSuite->categories() === ['alpha' => 'modular', 'beta' => 'micro']
+            $frameworkSuite->categories() === ['alpha' => 'full-stack', 'beta' => 'micro']
             && $frameworkSuite->categories(['beta']) === ['beta' => 'micro'],
             'framework categories are imported and retain target selection',
+        );
+        $assert(
+            $frameworkSuite->architectures() === ['alpha' => 'component-based', 'beta' => 'mvc-hmvc']
+            && $frameworkSuite->architectures(['alpha']) === ['alpha' => 'component-based'],
+            'framework architectures are imported and retain target selection',
         );
         file_put_contents(
             $suiteDirectory . '/.benchmark-server.json',
@@ -762,19 +768,39 @@ namespace {
             'codeigniter' => 'full-stack',
             'fatfree' => 'micro',
             'flight' => 'micro',
-            'infbyte' => 'modular',
+            'infbyte' => 'full-stack',
             'kumbia' => 'full-stack',
             'laravel' => 'full-stack',
-            'laravel-api' => 'modular',
+            'laravel-api' => 'full-stack',
             'leaf' => 'micro',
             'lumen' => 'micro',
-            'nette' => 'modular',
+            'nette' => 'full-stack',
             'pure-php' => 'baseline',
             'slim' => 'micro',
-            'symfony' => 'modular',
+            'symfony' => 'full-stack',
             'yii-basic' => 'full-stack',
         ],
-        'bundled framework categories cover full-stack, micro, modular, and baseline targets',
+        'bundled framework categories cover full-stack, micro, and baseline targets',
+    );
+    $assert(
+        $bundledSuite->architectures() === [
+            'cakephp' => 'mvc-hmvc',
+            'codeigniter' => 'mvc-hmvc',
+            'fatfree' => 'mvc-hmvc',
+            'flight' => 'component-based',
+            'infbyte' => 'component-based',
+            'kumbia' => 'mvc-hmvc',
+            'laravel' => 'mvc-hmvc',
+            'laravel-api' => 'mvc-hmvc',
+            'leaf' => 'component-based',
+            'lumen' => 'mvc-hmvc',
+            'nette' => 'component-based',
+            'pure-php' => 'baseline',
+            'slim' => 'component-based',
+            'symfony' => 'component-based',
+            'yii-basic' => 'mvc-hmvc',
+        ],
+        'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
     );
     $assert(
         $bundledSuite->configs(['symfony'])[0]->getUrl()
@@ -850,13 +876,15 @@ namespace {
     ];
     $firstArchive = $history->save([
         'recordedAt' => '2026-06-10T08:15:00+00:00',
-        'categories' => ['test' => 'modular'],
+        'categories' => ['test' => 'full-stack'],
+        'architectures' => ['test' => 'component-based'],
         'results' => ['test' => $historyResult],
     ], '# First');
     $historyResult['peak']['req_per_min'] *= 1.10;
     $secondArchive = $history->save([
         'recordedAt' => '2026-07-10T12:30:00+00:00',
-        'categories' => ['test' => 'modular'],
+        'categories' => ['test' => 'full-stack'],
+        'architectures' => ['test' => 'component-based'],
         'results' => ['test' => $historyResult],
     ], '# Second');
     $assert(count($history->entries()) === 2, 'benchmark history lists archived runs');
@@ -888,15 +916,19 @@ namespace {
         && str_contains($dashboard, 'Theme · Auto')
         && str_contains($dashboard, 'id="category-filter"')
         && str_contains($dashboard, 'Report menu')
-        && str_contains($dashboard, 'Pure PHP excluded')
-        && str_contains($dashboard, 'All frameworks')
+        && str_contains($dashboard, 'Sustainable leaders')
+        && str_contains($dashboard, 'id="architecture-filter"')
+        && str_contains($dashboard, "new Option('All','all')")
         && str_contains($dashboard, 'Pure PHP baseline')
         && str_contains($dashboard, 'data-category="full-stack"')
         && str_contains($dashboard, "entry.category==='baseline'")
         && str_contains($dashboard, 'decorateTargetCells')
         && str_contains($dashboard, 'categoryMap')
+        && str_contains($dashboard, 'architectureMap')
+        && str_contains($dashboard, "['Full Stack',entry=>entry.category==='full-stack']")
+        && str_contains($dashboard, "['MVC/HMVC',entry=>entry.architecture==='mvc-hmvc']")
         && str_contains($dashboard, 'server_execution_ms'),
-        'browser dashboard includes grouped actions, baseline-aware category filtering and colors, category badges, a framework-only leader, system-aware themes, concurrency detail, and sortable data',
+        'browser dashboard includes grouped actions, baseline-aware type and architecture filters, five framework-only leaders, classification badges, system-aware themes, concurrency detail, and sortable data',
     );
     $expectException(
         RuntimeException::class,
@@ -905,7 +937,8 @@ namespace {
     );
     $replacementArchive = $history->save([
         'recordedAt' => '2026-07-20T12:30:00+00:00',
-        'categories' => ['test' => 'modular'],
+        'categories' => ['test' => 'full-stack'],
+        'architectures' => ['test' => 'component-based'],
         'results' => ['test' => $historyResult],
     ], '# July replacement');
     $historyIndex = file_get_contents($historyDirectory . '/index.html');
