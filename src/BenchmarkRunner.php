@@ -890,8 +890,8 @@ final class BenchmarkRunner
             'phpVersion' => PHP_VERSION,
             'phpSapi' => PHP_SAPI,
             'memoryLimit' => ini_get('memory_limit'),
-            'opcacheEnabled' => filter_var(ini_get('opcache.enable_cli'), FILTER_VALIDATE_BOOL),
-            'opcacheJit' => ini_get('opcache.jit'),
+            'cliOpcacheEnabled' => filter_var(ini_get('opcache.enable_cli'), FILTER_VALIDATE_BOOL),
+            'cliOpcacheJit' => ini_get('opcache.jit'),
             'xdebugLoaded' => extension_loaded('xdebug'),
             'curlVersion' => $curl['version'] ?? 'unknown',
             'operatingSystem' => PHP_OS_FAMILY . ' ' . php_uname('r'),
@@ -1009,8 +1009,8 @@ final class BenchmarkRunner
             'phpVersion',
             'phpSapi',
             'memoryLimit',
-            'opcacheEnabled',
-            'opcacheJit',
+            'cliOpcacheEnabled',
+            'cliOpcacheJit',
             'xdebugLoaded',
             'curlVersion',
             'operatingSystem',
@@ -1357,6 +1357,12 @@ final class BenchmarkRunner
 
     private static function humanize(string $key): string
     {
+        if ($key === 'cliOpcacheEnabled') {
+            return 'CLI OPcache enabled';
+        }
+        if ($key === 'cliOpcacheJit') {
+            return 'CLI OPcache JIT mode';
+        }
         $words = str_replace('_', ' ', $key);
         $words = preg_replace('/(?<!^)[A-Z]/', ' $0', $words) ?? $words;
         return ucfirst(strtolower($words));

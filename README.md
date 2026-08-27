@@ -143,7 +143,9 @@ as canonical `results.json`, `report.md`, and an interactive Bootstrap 5.3.8
 `dashboard.html`. The history root also gets an `index.html` linking all runs.
 Browser reports display dates using the visitor's locale and time zone; CLI
 history listings use a human-readable UTC format. Pass `--no-archive` to disable
-files.
+files. Each artifact records the target web server's PHP version, SAPI, loaded
+configuration, and actual OPcache/JIT settings separately from the CLI load
+generator environment.
 
 The `Framework benchmarks` GitHub Actions workflow runs on day 1 of every month,
 after non-docs changes land on `main`, or manually. It uses a 10% RPM stability
@@ -284,8 +286,8 @@ php index.php > benchmark.md
 The Markdown report is organized for side-by-side comparison. Every concurrency
 level gets separate throughput, latency, and reliability tables, while serial
 measurements remain in their own latency and reliability tables. Configuration
-differences are pivoted by target. Shared settings, load-generator environment,
-and optional resource telemetry remain separate. JSON is the canonical
+differences are pivoted by target. Shared settings, target-server OPcache
+configuration, load-generator environment, and optional resource telemetry remain separate. JSON is the canonical
 machine-readable output and CSV remains available for flat data-processing
 workflows.
 

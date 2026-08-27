@@ -330,6 +330,12 @@ namespace {
         'load-generator implementation is recorded',
     );
     $assert(
+        array_key_exists('cliOpcacheEnabled', $result['configuration'])
+        && array_key_exists('cliOpcacheJit', $result['configuration'])
+        && !array_key_exists('opcacheEnabled', $result['configuration']),
+        'load-generator OPcache metadata is explicitly labeled as CLI configuration',
+    );
+    $assert(
         $result['runs'][0]['targetOrder'] === ['per-config', 'rotation-target']
         && $result['runs'][1]['targetOrder'] === ['rotation-target', 'per-config'],
         'target order rotates between repetitions',
@@ -368,6 +374,11 @@ namespace {
     $assert(
         str_contains($markdown, '## Load-generator environment'),
         'load-generator runtime details have their own table',
+    );
+    $assert(
+        str_contains($markdown, 'CLI OPcache enabled')
+        && !str_contains($markdown, '| Opcache enabled |'),
+        'Markdown explicitly labels load-generator OPcache as CLI configuration',
     );
     $assert(
         str_contains($markdown, '## Target-specific configuration'),
@@ -689,6 +700,21 @@ namespace {
         );
 
         $frameworkManager = new PhpFrameworksBenchManager($frameworkSuite);
+        $parseServerEnvironment = new ReflectionMethod($frameworkManager, 'parseServerEnvironment');
+        $parsedServerEnvironment = $parseServerEnvironment->invoke(null, json_encode([
+            'phpVersion' => '8.5.0',
+            'phpSapi' => 'apache2handler',
+            'opcache' => ['enabled' => true, 'jitEnabled' => false],
+        ], JSON_THROW_ON_ERROR));
+        $legacyServerEnvironment = $parseServerEnvironment->invoke(
+            null,
+            "PHP: 8.4.0\nOPCache: Off\n",
+        );
+        $assert(
+            $parsedServerEnvironment['opcache']['enabled'] === true
+            && $legacyServerEnvironment['opcache']['enabled'] === false,
+            'target-server configuration accepts structured and legacy fixture responses',
+        );
         $setupPlan = $frameworkManager->lifecycle('setup', ['alpha'], dryRun: true);
         $assert(
             $setupPlan[0]['status'] === 'dry-run'
@@ -874,8 +900,28 @@ namespace {
         'server_execution_ms' => ['samples' => 100, 'average' => 1.25, 'minimum' => 1.0, 'maximum' => 2.0],
         'included_files' => ['samples' => 100, 'average' => 17.0, 'minimum' => 17.0, 'maximum' => 17.0],
     ];
+    $targetServerEnvironment = [
+        'phpVersion' => '8.5.0',
+        'phpSapi' => 'apache2handler',
+        'loadedIni' => '/usr/local/etc/php/php.ini',
+        'opcache' => [
+            'extensionLoaded' => true,
+            'enabled' => true,
+            'enableSetting' => true,
+            'enableCliSetting' => false,
+            'jitEnabled' => false,
+            'jitMode' => 'disable',
+            'jitBufferSize' => '0',
+            'memoryConsumption' => '134217728',
+            'internedStringsBuffer' => '8',
+            'maxAcceleratedFiles' => 10_000,
+            'validateTimestamps' => true,
+            'revalidateFrequencySeconds' => 2,
+        ],
+    ];
     $firstArchive = $history->save([
         'recordedAt' => '2026-06-10T08:15:00+00:00',
+        'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
         'results' => ['test' => $historyResult],
@@ -883,6 +929,7 @@ namespace {
     $historyResult['peak']['req_per_min'] *= 1.10;
     $secondArchive = $history->save([
         'recordedAt' => '2026-07-10T12:30:00+00:00',
+        'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
         'results' => ['test' => $historyResult],
@@ -925,6 +972,10 @@ namespace {
         && str_contains($dashboard, 'decorateTargetCells')
         && str_contains($dashboard, 'categoryMap')
         && str_contains($dashboard, 'architectureMap')
+        && str_contains($dashboard, 'Target-server environment')
+        && str_contains($dashboard, 'OPcache enabled for web requests')
+        && str_contains($dashboard, 'CLI OPcache enabled')
+        && str_contains($dashboard, 'serverOpcacheRevalidateFrequencySeconds')
         && str_contains($dashboard, "['Full Stack',entry=>entry.category==='full-stack']")
         && str_contains($dashboard, "['MVC/HMVC',entry=>entry.architecture==='mvc-hmvc']")
         && str_contains($dashboard, 'server_execution_ms'),
@@ -937,6 +988,7 @@ namespace {
     );
     $replacementArchive = $history->save([
         'recordedAt' => '2026-07-20T12:30:00+00:00',
+        'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
         'results' => ['test' => $historyResult],
