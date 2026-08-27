@@ -649,8 +649,9 @@ namespace {
     ], JSON_THROW_ON_ERROR));
     file_put_contents(
         $suiteDirectory . '/beta/asset/vendor/composer/installed.php',
-        "<?php return ['root' => ['name' => 'vendor/beta', 'pretty_version' => '2.4.0'], 'versions' => []];\n",
+        "<?php return ['root' => ['name' => 'vendor/beta', 'pretty_version' => 'dev-main'], 'versions' => []];\n",
     );
+    file_put_contents($suiteDirectory . '/beta/asset/.benchmark-project-version', "vendor/beta\n2.4.0\n");
     file_put_contents($suiteDirectory . '/.docker/apache.dockerfile', "FROM php:8.4-apache\n");
 
     try {
@@ -673,8 +674,14 @@ namespace {
                 'alpha' => 'v3.2.1',
                 'beta' => '2.4.0',
             ],
-            'framework versions resolve from locked dependencies and Composer root metadata',
+            'framework versions resolve from production locks and recorded stable create-project releases',
         );
+        unlink($suiteDirectory . '/beta/asset/.benchmark-project-version');
+        $assert(
+            $frameworkSuite->versions(['beta']) === ['beta' => 'Version unavailable'],
+            'development branch names are omitted when no stable release can be proven',
+        );
+        file_put_contents($suiteDirectory . '/beta/asset/.benchmark-project-version', "vendor/beta\n2.4.0\n");
         file_put_contents(
             $suiteDirectory . '/.benchmark-server.json',
             json_encode(['baseUrl' => 'http://127.0.0.1:43210/bench'], JSON_THROW_ON_ERROR),
@@ -788,6 +795,7 @@ namespace {
         unlink($suiteDirectory . '/alpha/_benchmark/hello_world.sh');
         unlink($suiteDirectory . '/beta/_benchmark/hello_world.sh');
         unlink($suiteDirectory . '/alpha/asset/composer.lock');
+        unlink($suiteDirectory . '/beta/asset/.benchmark-project-version');
         unlink($suiteDirectory . '/beta/asset/vendor/composer/installed.php');
         unlink($suiteDirectory . '/.docker/apache.dockerfile');
         unlink($suiteDirectory . '/config');
@@ -896,6 +904,8 @@ namespace {
         is_string($lifecycleSource)
         && str_contains($lifecycleSource, 'composer create-project')
         && str_contains($lifecycleSource, '--no-dev --remove-vcs')
+        && str_contains($lifecycleSource, '--stability=stable')
+        && str_contains($lifecycleSource, '.benchmark-project-version')
         && str_contains($lifecycleSource, 'composer --working-dir="$asset_dir" install --prefer-dist --no-interaction')
         && str_contains($lifecycleSource, '--no-dev --classmap-authoritative --no-progress')
         && str_contains($lifecycleSource, 'cp -a "$build_dir/." "$asset_dir/"')
@@ -1045,6 +1055,14 @@ namespace {
         && str_contains($dashboard, 'versionMap')
         && str_contains($dashboard, 'badge-version')
         && str_contains($dashboard, 'v3.2.1')
+        && str_contains($dashboard, 'diagnosticTitle')
+        && str_contains($dashboard, 'target-name-line')
+        && !str_contains($dashboard, '>Status</button>')
+        && !str_contains($dashboard, '>Failed</button>')
+        && !str_contains($dashboard, '>Error %</button>')
+        && !str_contains($dashboard, '<th>Failed</th>')
+        && !str_contains($dashboard, '<th>Error %</th>')
+        && !str_contains($dashboard, '<th>Stability</th>')
         && str_contains($dashboard, 'Target-server environment')
         && str_contains($dashboard, 'Benchmark environment profile')
         && str_contains($dashboard, 'OPcache enabled for web requests')
