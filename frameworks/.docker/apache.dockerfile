@@ -9,7 +9,8 @@ RUN apt-get update \
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
 RUN a2enmod rewrite \
-    && printf 'ServerName 127.0.0.1\n' > /etc/apache2/conf-available/benchmark.conf \
+    && printf 'ServerName 127.0.0.1\nSetEnv BENCHMARK_ENVIRONMENT production\nSetEnv APP_ENV production\nSetEnv APP_DEBUG 0\nSetEnv CI_ENVIRONMENT production\n' \
+        > /etc/apache2/conf-available/benchmark.conf \
     && a2enconf benchmark \
     && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
     && printf 'display_errors=Off\nlog_errors=On\nopcache.enable=1\n' \

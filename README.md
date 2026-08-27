@@ -52,8 +52,16 @@ installs the framework application into its ignored `asset/` directory, while
 framework therefore keeps its own `.gitignore` inside `asset/` without replacing
 or affecting the benchmark definition.
 
+Every generated application that uses Composer is installed with `--no-dev` and
+an authoritative classmap. The lifecycle applies a predefined production
+environment for each framework before running its supported cache/optimization
+commands.
+The Docker server also exports production environment variables, uses
+`php.ini-production`, disables displayed errors, and enables OPcache. Reports
+record the active benchmark environment profile under target-server details.
+
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
-`infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`,
+`infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
 `pure-php`, `slim`, `symfony`, and `yii-basic`. The API target remains separate
 because it measures Laravel's API routing/JSON response path rather than its web
 route. Dashboard classifications are defined in `frameworks/config`: Full Stack
@@ -145,7 +153,8 @@ Browser reports display dates using the visitor's locale and time zone; CLI
 history listings use a human-readable UTC format. Pass `--no-archive` to disable
 files. Each artifact records the target web server's PHP version, SAPI, loaded
 configuration, and actual OPcache/JIT settings separately from the CLI load
-generator environment.
+generator environment. Installed framework releases are resolved from Composer
+metadata and displayed beside framework names in the dashboard.
 
 The `Framework benchmarks` GitHub Actions workflow runs on day 1 of every month,
 after non-docs changes land on `main`, or manually. It uses a 10% RPM stability

@@ -622,13 +622,16 @@ namespace {
     $suiteDirectory = sys_get_temp_dir() . '/benchmark-framework-suite-' . bin2hex(random_bytes(8));
     mkdir($suiteDirectory . '/alpha/_benchmark', 0777, true);
     mkdir($suiteDirectory . '/beta/_benchmark', 0777, true);
+    mkdir($suiteDirectory . '/alpha/asset', 0777, true);
+    mkdir($suiteDirectory . '/beta/asset/vendor/composer', 0777, true);
     mkdir($suiteDirectory . '/.docker', 0777, true);
     file_put_contents(
         $suiteDirectory . '/config',
         "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
         . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
-        . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n",
+        . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n"
+        . "framework_version_packages=\"\nalpha:vendor/alpha\nbeta:vendor/beta\n\"\n",
     );
     file_put_contents(
         $suiteDirectory . '/alpha/_benchmark/hello_world.sh',
@@ -640,6 +643,14 @@ namespace {
     );
     file_put_contents($suiteDirectory . '/alpha/_benchmark/setup.sh', "#!/bin/sh\nexit 0\n");
     file_put_contents($suiteDirectory . '/alpha/_benchmark/clean.sh', "#!/bin/sh\nexit 0\n");
+    file_put_contents($suiteDirectory . '/alpha/asset/composer.lock', json_encode([
+        'packages' => [['name' => 'vendor/alpha', 'version' => 'v3.2.1']],
+        'packages-dev' => [],
+    ], JSON_THROW_ON_ERROR));
+    file_put_contents(
+        $suiteDirectory . '/beta/asset/vendor/composer/installed.php',
+        "<?php return ['root' => ['name' => 'vendor/beta', 'pretty_version' => '2.4.0'], 'versions' => []];\n",
+    );
     file_put_contents($suiteDirectory . '/.docker/apache.dockerfile', "FROM php:8.4-apache\n");
 
     try {
@@ -656,6 +667,13 @@ namespace {
             $frameworkSuite->architectures() === ['alpha' => 'component-based', 'beta' => 'mvc-hmvc']
             && $frameworkSuite->architectures(['alpha']) === ['alpha' => 'component-based'],
             'framework architectures are imported and retain target selection',
+        );
+        $assert(
+            $frameworkSuite->versions(serverPhpVersion: '8.5.0') === [
+                'alpha' => 'v3.2.1',
+                'beta' => '2.4.0',
+            ],
+            'framework versions resolve from locked dependencies and Composer root metadata',
         );
         file_put_contents(
             $suiteDirectory . '/.benchmark-server.json',
@@ -704,6 +722,7 @@ namespace {
         $parsedServerEnvironment = $parseServerEnvironment->invoke(null, json_encode([
             'phpVersion' => '8.5.0',
             'phpSapi' => 'apache2handler',
+            'benchmarkProfile' => 'production',
             'opcache' => ['enabled' => true, 'jitEnabled' => false],
         ], JSON_THROW_ON_ERROR));
         $legacyServerEnvironment = $parseServerEnvironment->invoke(
@@ -712,6 +731,7 @@ namespace {
         );
         $assert(
             $parsedServerEnvironment['opcache']['enabled'] === true
+            && $parsedServerEnvironment['benchmarkProfile'] === 'production'
             && $legacyServerEnvironment['opcache']['enabled'] === false,
             'target-server configuration accepts structured and legacy fixture responses',
         );
@@ -767,11 +787,17 @@ namespace {
         unlink($suiteDirectory . '/alpha/_benchmark/clean.sh');
         unlink($suiteDirectory . '/alpha/_benchmark/hello_world.sh');
         unlink($suiteDirectory . '/beta/_benchmark/hello_world.sh');
+        unlink($suiteDirectory . '/alpha/asset/composer.lock');
+        unlink($suiteDirectory . '/beta/asset/vendor/composer/installed.php');
         unlink($suiteDirectory . '/.docker/apache.dockerfile');
         unlink($suiteDirectory . '/config');
         rmdir($suiteDirectory . '/alpha/_benchmark');
+        rmdir($suiteDirectory . '/alpha/asset');
         rmdir($suiteDirectory . '/alpha');
         rmdir($suiteDirectory . '/beta/_benchmark');
+        rmdir($suiteDirectory . '/beta/asset/vendor/composer');
+        rmdir($suiteDirectory . '/beta/asset/vendor');
+        rmdir($suiteDirectory . '/beta/asset');
         rmdir($suiteDirectory . '/beta');
         rmdir($suiteDirectory . '/.docker');
         rmdir($suiteDirectory);
@@ -784,7 +810,7 @@ namespace {
     );
     $bundledTargets = [
         'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'kumbia', 'laravel',
-        'laravel-api', 'leaf', 'lumen', 'nette', 'pure-php', 'slim', 'symfony',
+        'laravel-api', 'leaf', 'nette', 'pure-php', 'slim', 'symfony',
         'yii-basic',
     ];
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
@@ -799,7 +825,6 @@ namespace {
             'laravel' => 'full-stack',
             'laravel-api' => 'full-stack',
             'leaf' => 'micro',
-            'lumen' => 'micro',
             'nette' => 'full-stack',
             'pure-php' => 'baseline',
             'slim' => 'micro',
@@ -819,7 +844,6 @@ namespace {
             'laravel' => 'mvc-hmvc',
             'laravel-api' => 'mvc-hmvc',
             'leaf' => 'component-based',
-            'lumen' => 'mvc-hmvc',
             'nette' => 'component-based',
             'pure-php' => 'baseline',
             'slim' => 'component-based',
@@ -827,6 +851,10 @@ namespace {
             'yii-basic' => 'mvc-hmvc',
         ],
         'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
+    );
+    $assert(
+        $bundledSuite->versions(['pure-php'], '8.5.0') === ['pure-php' => 'PHP 8.5.0'],
+        'the Pure PHP baseline displays the benchmark server PHP version',
     );
     $assert(
         $bundledSuite->configs(['symfony'])[0]->getUrl()
@@ -867,6 +895,9 @@ namespace {
     $assert(
         is_string($lifecycleSource)
         && str_contains($lifecycleSource, 'composer create-project')
+        && str_contains($lifecycleSource, '--no-dev --remove-vcs')
+        && str_contains($lifecycleSource, 'composer --working-dir="$asset_dir" install --prefer-dist --no-interaction')
+        && str_contains($lifecycleSource, '--no-dev --classmap-authoritative --no-progress')
         && str_contains($lifecycleSource, 'cp -a "$build_dir/." "$asset_dir/"')
         && !str_contains($lifecycleSource, 'rm -f -- "$build_dir/.gitignore"')
         && preg_match('/create-project[^\n]*:[0-9]/', $lifecycleSource) !== 1,
@@ -874,9 +905,35 @@ namespace {
     );
     $assert(
         is_string($lifecycleSource)
+        && str_contains($lifecycleSource, 'configure_production_environment')
+        && str_contains($lifecycleSource, 'CI_ENVIRONMENT production')
+        && str_contains($lifecycleSource, 'APP_ENV prod')
+        && str_contains($lifecycleSource, 'printf \'production\n\' > "$suite_dir/.benchmark-profile"')
+        && str_contains($lifecycleSource, 'optimize_production')
         && str_contains($lifecycleSource, 'SESSION_DRIVER array')
         && str_contains($lifecycleSource, 'chmod a+r "$asset_dir/.env"'),
-        'generated web fixtures receive readable production-safe runtime configuration',
+        'generated web fixtures receive predefined production environments and optimization commands',
+    );
+    $dockerSource = file_get_contents($bundledSuiteDirectory . '/.docker/apache.dockerfile');
+    $assert(
+        is_string($dockerSource)
+        && str_contains($dockerSource, 'php.ini-production')
+        && str_contains($dockerSource, 'SetEnv BENCHMARK_ENVIRONMENT production')
+        && str_contains($dockerSource, 'SetEnv APP_DEBUG 0')
+        && str_contains($dockerSource, 'opcache.enable=1'),
+        'Docker serves every fixture with the shared production runtime profile',
+    );
+    $assert(
+        !is_dir($bundledSuiteDirectory . '/lumen')
+        && !str_contains((string) file_get_contents($bundledSuiteDirectory . '/config'), "\nlumen\n"),
+        'the unmaintained Lumen target is removed from the bundled suite',
+    );
+    $assert(
+        str_contains((string) file_get_contents($bundledSuiteDirectory . '/kumbia/_benchmark/overlay/default/public/index.php'), 'const PRODUCTION = true;')
+        && str_contains((string) file_get_contents($bundledSuiteDirectory . '/nette/_benchmark/overlay/app/Bootstrap.php'), 'setDebugMode(false)')
+        && str_contains((string) file_get_contents($bundledSuiteDirectory . '/yii-basic/_benchmark/overlay/web/index.php'), "define('YII_ENV', 'prod')")
+        && str_contains((string) file_get_contents($bundledSuiteDirectory . '/fatfree/_benchmark/overlay/public/index.php'), "set('DEBUG', 0)"),
+        'framework overlays explicitly disable development behavior where the framework exposes a production switch',
     );
     $assert(
         is_file($bundledSuiteDirectory . '/cakephp/_benchmark/overlay/.htaccess'),
@@ -904,6 +961,7 @@ namespace {
         'phpVersion' => '8.5.0',
         'phpSapi' => 'apache2handler',
         'loadedIni' => '/usr/local/etc/php/php.ini',
+        'benchmarkProfile' => 'production',
         'opcache' => [
             'extensionLoaded' => true,
             'enabled' => true,
@@ -924,6 +982,7 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# First');
     $historyResult['peak']['req_per_min'] *= 1.10;
@@ -932,6 +991,7 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# Second');
     $assert(count($history->entries()) === 2, 'benchmark history lists archived runs');
@@ -972,7 +1032,11 @@ namespace {
         && str_contains($dashboard, 'decorateTargetCells')
         && str_contains($dashboard, 'categoryMap')
         && str_contains($dashboard, 'architectureMap')
+        && str_contains($dashboard, 'versionMap')
+        && str_contains($dashboard, 'badge-version')
+        && str_contains($dashboard, 'v3.2.1')
         && str_contains($dashboard, 'Target-server environment')
+        && str_contains($dashboard, 'Benchmark environment profile')
         && str_contains($dashboard, 'OPcache enabled for web requests')
         && str_contains($dashboard, 'CLI OPcache enabled')
         && str_contains($dashboard, 'serverOpcacheRevalidateFrequencySeconds')
@@ -991,6 +1055,7 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# July replacement');
     $historyIndex = file_get_contents($historyDirectory . '/index.html');

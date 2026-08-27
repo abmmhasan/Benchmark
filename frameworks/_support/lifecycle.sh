@@ -27,7 +27,6 @@ case "$target" in
     kumbia) package="kumbia/framework" ;;
     laravel|laravel-api) package="laravel/laravel" ;;
     leaf) package="leafs/leaf" ;;
-    lumen) package="laravel/lumen" ;;
     nette) package="nette/web-project" ;;
     pure-php) package="" ;;
     slim) package="slim/slim-skeleton" ;;
@@ -77,6 +76,102 @@ set_env_value() {
     fi
 }
 
+configure_production_environment() {
+    case "$target" in
+        cakephp)
+            set_env_value "$asset_dir/.env" APP_ENV production
+            set_env_value "$asset_dir/.env" DEBUG false
+            ;;
+        codeigniter)
+            if [[ ! -f "$asset_dir/.env" && -f "$asset_dir/env" ]]; then
+                cp "$asset_dir/env" "$asset_dir/.env"
+            fi
+            set_env_value "$asset_dir/.env" CI_ENVIRONMENT production
+            ;;
+        flight)
+            set_env_value "$asset_dir/.env" APP_ENV production
+            set_env_value "$asset_dir/.env" APP_DEBUG false
+            ;;
+        infbyte|laravel|laravel-api)
+            set_env_value "$asset_dir/.env" APP_ENV production
+            set_env_value "$asset_dir/.env" APP_DEBUG false
+            ;;
+        symfony)
+            set_env_value "$asset_dir/.env" APP_ENV prod
+            set_env_value "$asset_dir/.env" APP_DEBUG 0
+            ;;
+        fatfree|kumbia|leaf|nette|pure-php|slim|yii-basic)
+            # These fixtures define production behavior directly in their overlays.
+            ;;
+    esac
+}
+
+prepare_runtime_directories() {
+    case "$target" in
+        cakephp)
+            rm -f -- "$asset_dir/webroot/.htaccess"
+            chmod -R a+rwX "$asset_dir/logs" "$asset_dir/tmp"
+            ;;
+        codeigniter)
+            rm -f -- "$asset_dir/public/.htaccess"
+            chmod -R a+rwX "$asset_dir/writable"
+            ;;
+        flight)
+            chmod -R a+rwX "$asset_dir/app/cache" "$asset_dir/app/log"
+            ;;
+        infbyte)
+            rm -f -- "$asset_dir/public/.htaccess"
+            chmod a+r "$asset_dir/.env"
+            chmod -R a+rwX "$asset_dir/bootstrap/cache" "$asset_dir/storage"
+            ;;
+        kumbia)
+            find "$asset_dir" -name '.htaccess' -type f -delete
+            ;;
+        laravel|laravel-api)
+            rm -f -- "$asset_dir/public/.htaccess"
+            set_env_value "$asset_dir/.env" SESSION_DRIVER array
+            set_env_value "$asset_dir/.env" CACHE_STORE array
+            set_env_value "$asset_dir/.env" QUEUE_CONNECTION sync
+            chmod a+r "$asset_dir/.env"
+            chmod -R a+rwX "$asset_dir/bootstrap/cache" "$asset_dir/storage"
+            ;;
+        nette)
+            chmod -R a+rwX "$asset_dir/log" "$asset_dir/temp"
+            ;;
+        symfony)
+            chmod -R a+rwX "$asset_dir/var"
+            ;;
+        yii-basic)
+            chmod -R a+rwX "$asset_dir/runtime" "$asset_dir/web/assets"
+            ;;
+        fatfree|leaf|pure-php|slim)
+            ;;
+    esac
+}
+
+optimize_production() {
+    case "$target" in
+        cakephp)
+            php "$asset_dir/bin/cake.php" cache clear_all
+            ;;
+        codeigniter)
+            php "$asset_dir/spark" optimize
+            ;;
+        infbyte)
+            php "$asset_dir/infbyte" optimize
+            ;;
+        laravel|laravel-api)
+            php "$asset_dir/artisan" optimize
+            ;;
+        symfony)
+            composer --working-dir="$asset_dir" dump-env prod --ansi
+            APP_ENV=prod APP_DEBUG=0 php "$asset_dir/bin/console" cache:clear --no-debug
+            ;;
+        fatfree|flight|kumbia|leaf|nette|pure-php|slim|yii-basic)
+            ;;
+    esac
+}
+
 setup_project() {
     clean_generated
     mkdir -p -- "$asset_dir"
@@ -94,66 +189,21 @@ setup_project() {
 
     if [[ "$target" == 'symfony' ]]; then
         composer --working-dir="$asset_dir" require --no-interaction \
+            --update-no-dev --classmap-authoritative --no-progress \
             symfony/framework-bundle symfony/runtime symfony/yaml
     fi
 
     apply_overlay
+    configure_production_environment
+    printf 'production\n' > "$suite_dir/.benchmark-profile"
 
     if [[ -f "$asset_dir/composer.json" ]]; then
-        composer --working-dir="$asset_dir" dump-autoload \
-            --no-dev --classmap-authoritative --ansi
+        composer --working-dir="$asset_dir" install --prefer-dist --no-interaction \
+            --no-dev --classmap-authoritative --no-progress --ansi
     fi
 
-    case "$target" in
-        cakephp)
-            rm -f -- "$asset_dir/webroot/.htaccess"
-            chmod -R a+rwX "$asset_dir/logs" "$asset_dir/tmp"
-            ;;
-        codeigniter)
-            rm -f -- "$asset_dir/public/.htaccess"
-            chmod -R a+rwX "$asset_dir/writable"
-            ;;
-        flight)
-            chmod -R a+rwX "$asset_dir/app/cache" "$asset_dir/app/log"
-            ;;
-        infbyte)
-            rm -f -- "$asset_dir/public/.htaccess"
-            set_env_value "$asset_dir/.env" APP_ENV production
-            set_env_value "$asset_dir/.env" APP_DEBUG false
-            chmod a+r "$asset_dir/.env"
-            php "$asset_dir/infbyte" optimize
-            chmod -R a+rwX "$asset_dir/bootstrap/cache" "$asset_dir/storage"
-            ;;
-        kumbia)
-            find "$asset_dir" -name '.htaccess' -type f -delete
-            ;;
-        laravel|laravel-api)
-            rm -f -- "$asset_dir/public/.htaccess"
-            set_env_value "$asset_dir/.env" APP_ENV production
-            set_env_value "$asset_dir/.env" APP_DEBUG false
-            set_env_value "$asset_dir/.env" SESSION_DRIVER array
-            set_env_value "$asset_dir/.env" CACHE_STORE array
-            set_env_value "$asset_dir/.env" QUEUE_CONNECTION sync
-            chmod a+r "$asset_dir/.env"
-            php "$asset_dir/artisan" optimize
-            chmod -R a+rwX "$asset_dir/bootstrap/cache" "$asset_dir/storage"
-            ;;
-        lumen)
-            rm -f -- "$asset_dir/public/.htaccess"
-            chmod -R a+rwX "$asset_dir/storage"
-            ;;
-        nette)
-            chmod -R a+rwX "$asset_dir/log" "$asset_dir/temp"
-            ;;
-        symfony)
-            composer --working-dir="$asset_dir" dump-env prod --ansi
-            APP_ENV=prod APP_DEBUG=0 php "$asset_dir/bin/console" cache:clear --no-debug
-            chmod -R a+rwX "$asset_dir/var"
-            ;;
-        yii-basic)
-            chmod -R a+rwX "$asset_dir/runtime" "$asset_dir/web/assets"
-            ;;
-    esac
+    prepare_runtime_directories
+    optimize_production
 }
 
 clear_cache() {
@@ -164,7 +214,6 @@ clear_cache() {
         infbyte) php "$asset_dir/infbyte" optimize:clear; php "$asset_dir/infbyte" optimize ;;
         kumbia) clear_directory "$asset_dir/default/app/tmp/cache" ;;
         laravel|laravel-api) php "$asset_dir/artisan" optimize:clear; php "$asset_dir/artisan" optimize ;;
-        lumen) php "$asset_dir/artisan" cache:clear ;;
         nette) clear_directory "$asset_dir/temp/cache" ;;
         slim) clear_directory "$asset_dir/var/cache" ;;
         symfony) APP_ENV=prod APP_DEBUG=0 php "$asset_dir/bin/console" cache:clear --no-debug ;;
