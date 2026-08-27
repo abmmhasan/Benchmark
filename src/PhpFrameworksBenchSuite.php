@@ -94,6 +94,37 @@ final class PhpFrameworksBenchSuite
     }
 
     /**
+     * Return dashboard category slugs keyed by target name.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function categories(array $targets = []): array
+    {
+        $available = $this->targets();
+        $selected = $targets === [] ? $available : array_values($targets);
+        $unknown = array_values(array_diff($selected, $available));
+        if ($unknown !== []) {
+            throw new InvalidArgumentException('Unknown framework target(s): ' . implode(', ', $unknown));
+        }
+
+        $categories = array_fill_keys($available, 'uncategorized');
+        if (preg_match('/^framework_categories\s*=\s*"(?<categories>.*?)"\s*$/ms', $this->config, $match) === 1) {
+            $definitions = preg_split('/\s+/', trim($match['categories']), flags: PREG_SPLIT_NO_EMPTY);
+            foreach (is_array($definitions) ? $definitions : [] as $definition) {
+                if (preg_match('/^(?<target>[a-zA-Z0-9][a-zA-Z0-9._-]*):(?<category>[a-z][a-z0-9-]*)$/', $definition, $parts) !== 1) {
+                    throw new RuntimeException("Invalid framework category definition: {$definition}");
+                }
+                if (isset($categories[$parts['target']])) {
+                    $categories[$parts['target']] = $parts['category'];
+                }
+            }
+        }
+
+        return array_intersect_key($categories, array_flip($selected));
+    }
+
+    /**
      * @param list<string> $targets Empty means every configured target.
      * @return list<BenchmarkConfig>
      */

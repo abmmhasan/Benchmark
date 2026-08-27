@@ -56,7 +56,8 @@ The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
 `infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `lumen`, `nette`,
 `pure-php`, `slim`, `symfony`, and `yii-basic`. The API target remains separate
 because it measures Laravel's API routing/JSON response path rather than its web
-route.
+route. Dashboard categories are defined in `frameworks/config`: full-stack,
+micro, modular, and the Pure PHP baseline.
 
 ### Run all targets
 

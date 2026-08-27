@@ -25,3 +25,22 @@ slim
 symfony
 yii-basic
 "
+
+# Dashboard categories. Pure PHP is a reference baseline, not a framework.
+framework_categories="
+cakephp:full-stack
+codeigniter:full-stack
+fatfree:micro
+flight:micro
+infbyte:modular
+kumbia:full-stack
+laravel:full-stack
+laravel-api:modular
+leaf:micro
+lumen:micro
+nette:modular
+pure-php:baseline
+slim:micro
+symfony:modular
+yii-basic:full-stack
+"

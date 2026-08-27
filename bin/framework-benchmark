@@ -474,12 +474,14 @@ try {
     }
 
     if (!flag($options, 'no-archive')) {
+        $targetNames = array_map(static fn(BenchmarkConfig $config): string => $config->getName(), $configs);
         $payload = [
             'schemaVersion' => 2,
             'loadGenerator' => 'php-curl-multi',
             'suiteDirectory' => $suite->getProjectDirectory(),
             'baseUrl' => $suite->getBaseUrl(),
-            'targets' => array_map(static fn(BenchmarkConfig $config): string => $config->getName(), $configs),
+            'targets' => $targetNames,
+            'categories' => $suite->categories($targetNames),
             'invocation' => [
                 'connections' => $connections,
                 'concurrencyLevels' => $levels,
