@@ -910,6 +910,7 @@ namespace {
         && str_contains($lifecycleSource, 'APP_ENV prod')
         && str_contains($lifecycleSource, 'printf \'production\n\' > "$suite_dir/.benchmark-profile"')
         && str_contains($lifecycleSource, 'optimize_production')
+        && substr_count($lifecycleSource, 'chmod -R a+rX "$asset_dir/bootstrap/cache"') === 2
         && str_contains($lifecycleSource, 'SESSION_DRIVER array')
         && str_contains($lifecycleSource, 'chmod a+r "$asset_dir/.env"'),
         'generated web fixtures receive predefined production environments and optimization commands',
@@ -919,9 +920,18 @@ namespace {
         is_string($dockerSource)
         && str_contains($dockerSource, 'php.ini-production')
         && str_contains($dockerSource, 'SetEnv BENCHMARK_ENVIRONMENT production')
-        && str_contains($dockerSource, 'SetEnv APP_DEBUG 0')
+        && !str_contains($dockerSource, 'SetEnv APP_ENV')
+        && !str_contains($dockerSource, 'SetEnv APP_DEBUG')
+        && !str_contains($dockerSource, 'SetEnv CI_ENVIRONMENT')
         && str_contains($dockerSource, 'opcache.enable=1'),
-        'Docker serves every fixture with the shared production runtime profile',
+        'Docker records the shared profile without overriding framework-specific environments',
+    );
+    $workflowSource = file_get_contents(dirname(__DIR__) . '/.github/workflows/framework-benchmarks.yml');
+    $assert(
+        is_string($workflowSource)
+        && str_contains($workflowSource, 'if: failure()')
+        && str_contains($workflowSource, 'docker logs --tail 200 benchmark-frameworks-apache || true'),
+        'the automated workflow exposes server errors before stopping a failed benchmark container',
     );
     $assert(
         !is_dir($bundledSuiteDirectory . '/lumen')
