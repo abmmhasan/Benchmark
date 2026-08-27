@@ -204,10 +204,15 @@ final class PhpFrameworksBenchSuite
     {
         $asset = $this->projectDirectory . '/' . $target . '/asset';
         $lock = self::readJson($asset . '/composer.lock');
-        foreach ([...($lock['packages'] ?? []), ...($lock['packages-dev'] ?? [])] as $installed) {
+        foreach ($lock['packages'] ?? [] as $installed) {
             if (is_array($installed) && ($installed['name'] ?? null) === $package) {
-                return self::cleanVersion($installed['pretty_version'] ?? $installed['version'] ?? null);
+                return self::stableVersion($installed['pretty_version'] ?? $installed['version'] ?? null);
             }
+        }
+
+        $projectVersion = $this->installedProjectVersion($asset, $package);
+        if ($projectVersion !== null) {
+            return $projectVersion;
         }
 
         $installedPhp = $asset . '/vendor/composer/installed.php';
@@ -225,17 +230,32 @@ final class PhpFrameworksBenchSuite
             }
             $root = $set['root'] ?? null;
             if (is_array($root) && ($root['name'] ?? null) === $package) {
-                return self::cleanVersion($root['pretty_version'] ?? $root['version'] ?? null);
+                return self::stableVersion($root['pretty_version'] ?? $root['version'] ?? null);
             }
             $versions = $set['versions'] ?? [];
             if (is_array($versions) && is_array($versions[$package] ?? null)) {
-                return self::cleanVersion(
+                return self::stableVersion(
                     $versions[$package]['pretty_version'] ?? $versions[$package]['version'] ?? null,
                 );
             }
         }
 
         return null;
+    }
+
+    private function installedProjectVersion(string $asset, string $package): ?string
+    {
+        $marker = $asset . '/.benchmark-project-version';
+        if (!is_file($marker)) {
+            return null;
+        }
+
+        $lines = file($marker, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        if (!is_array($lines) || ($lines[0] ?? null) !== $package) {
+            return null;
+        }
+
+        return self::stableVersion($lines[1] ?? null);
     }
 
     /** @return array<string, mixed> */
@@ -256,6 +276,25 @@ final class PhpFrameworksBenchSuite
         }
 
         return trim($version);
+    }
+
+    private static function stableVersion(mixed $version): ?string
+    {
+        $version = self::cleanVersion($version);
+        if ($version === null) {
+            return null;
+        }
+
+        $normalized = strtolower($version);
+        if (
+            str_starts_with($normalized, 'dev-')
+            || str_ends_with($normalized, '-dev')
+            || in_array($normalized, ['main', 'master'], true)
+        ) {
+            return null;
+        }
+
+        return $version;
     }
 
     /**

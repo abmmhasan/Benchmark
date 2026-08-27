@@ -10,10 +10,14 @@ target_dir="$suite_dir/$target"
 benchmark_dir="$target_dir/_benchmark"
 asset_dir="$target_dir/asset"
 build_dir=""
+project_version_log=""
 
 cleanup_build() {
     if [[ -n "$build_dir" && -d "$build_dir" ]]; then
         rm -rf -- "$build_dir"
+    fi
+    if [[ -n "$project_version_log" && -f "$project_version_log" ]]; then
+        rm -f -- "$project_version_log"
     fi
 }
 trap cleanup_build EXIT
@@ -179,13 +183,33 @@ setup_project() {
 
     if [[ -n "$package" ]]; then
         build_dir="$target_dir/.benchmark-create-project"
+        project_version_log="$target_dir/.benchmark-create-project.log"
         composer create-project --prefer-dist --no-cache --no-interaction \
             --no-dev --remove-vcs --stability=stable \
-            "$package" "$build_dir" --ansi
+            "$package" "$build_dir" --no-ansi 2>&1 | tee "$project_version_log"
+
+        project_version=""
+        while IFS= read -r line; do
+            case "$line" in
+                *"Installing $package ("*")"*)
+                    project_version="${line#*"Installing $package ("}"
+                    project_version="${project_version%%)*}"
+                    break
+                    ;;
+            esac
+        done < "$project_version_log"
+        if [[ -z "$project_version" ]]; then
+            printf 'Unable to determine the stable release installed for %s\n' "$package" >&2
+            exit 1
+        fi
+
         rm -rf -- "$build_dir/_benchmark"
         cp -a "$build_dir/." "$asset_dir/"
+        printf '%s\n%s\n' "$package" "$project_version" > "$asset_dir/.benchmark-project-version"
         rm -rf -- "$build_dir"
+        rm -f -- "$project_version_log"
         build_dir=""
+        project_version_log=""
     fi
 
     if [[ "$target" == 'symfony' ]]; then
