@@ -615,7 +615,8 @@ namespace {
     file_put_contents(
         $suiteDirectory . '/config',
         "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
-        . "frameworks_list=\"\nalpha\nbeta\n\"\n",
+        . "frameworks_list=\"\nalpha\nbeta\n\"\n"
+        . "framework_categories=\"\nalpha:modular\nbeta:micro\n\"\n",
     );
     file_put_contents(
         $suiteDirectory . '/alpha/_benchmark/hello_world.sh',
@@ -634,6 +635,11 @@ namespace {
         $assert($frameworkSuite->targets() === ['alpha', 'beta'], 'framework targets follow suite config order');
         $assert($frameworkSuite->getSuggestedConcurrency() === 42, 'suite connection default is imported');
         $assert($frameworkSuite->getSuggestedDuration() === 17, 'suite duration default is imported');
+        $assert(
+            $frameworkSuite->categories() === ['alpha' => 'modular', 'beta' => 'micro']
+            && $frameworkSuite->categories(['beta']) === ['beta' => 'micro'],
+            'framework categories are imported and retain target selection',
+        );
         file_put_contents(
             $suiteDirectory . '/.benchmark-server.json',
             json_encode(['baseUrl' => 'http://127.0.0.1:43210/bench'], JSON_THROW_ON_ERROR),
@@ -751,6 +757,26 @@ namespace {
     ];
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
     $assert(
+        $bundledSuite->categories() === [
+            'cakephp' => 'full-stack',
+            'codeigniter' => 'full-stack',
+            'fatfree' => 'micro',
+            'flight' => 'micro',
+            'infbyte' => 'modular',
+            'kumbia' => 'full-stack',
+            'laravel' => 'full-stack',
+            'laravel-api' => 'modular',
+            'leaf' => 'micro',
+            'lumen' => 'micro',
+            'nette' => 'modular',
+            'pure-php' => 'baseline',
+            'slim' => 'micro',
+            'symfony' => 'modular',
+            'yii-basic' => 'full-stack',
+        ],
+        'bundled framework categories cover full-stack, micro, modular, and baseline targets',
+    );
+    $assert(
         $bundledSuite->configs(['symfony'])[0]->getUrl()
             === 'http://127.0.0.1:8080/frameworks/symfony/asset/public/index.php/hello/index',
         'bundled suite URL is generated from its internal config',
@@ -824,11 +850,13 @@ namespace {
     ];
     $firstArchive = $history->save([
         'recordedAt' => '2026-06-10T08:15:00+00:00',
+        'categories' => ['test' => 'modular'],
         'results' => ['test' => $historyResult],
     ], '# First');
     $historyResult['peak']['req_per_min'] *= 1.10;
     $secondArchive = $history->save([
         'recordedAt' => '2026-07-10T12:30:00+00:00',
+        'categories' => ['test' => 'modular'],
         'results' => ['test' => $historyResult],
     ], '# Second');
     $assert(count($history->entries()) === 2, 'benchmark history lists archived runs');
@@ -858,8 +886,17 @@ namespace {
         && str_contains($dashboard, 'humanDateTime')
         && str_contains($dashboard, 'prefers-color-scheme: dark')
         && str_contains($dashboard, 'Theme · Auto')
+        && str_contains($dashboard, 'id="category-filter"')
+        && str_contains($dashboard, 'Report menu')
+        && str_contains($dashboard, 'Pure PHP excluded')
+        && str_contains($dashboard, 'All frameworks')
+        && str_contains($dashboard, 'Pure PHP baseline')
+        && str_contains($dashboard, 'data-category="full-stack"')
+        && str_contains($dashboard, "entry.category==='baseline'")
+        && str_contains($dashboard, 'decorateTargetCells')
+        && str_contains($dashboard, 'categoryMap')
         && str_contains($dashboard, 'server_execution_ms'),
-        'browser dashboard includes Bootstrap, system-aware themes, readable dates, sorted guidance, concurrency detail, and sortable data',
+        'browser dashboard includes grouped actions, baseline-aware category filtering and colors, category badges, a framework-only leader, system-aware themes, concurrency detail, and sortable data',
     );
     $expectException(
         RuntimeException::class,
@@ -868,6 +905,7 @@ namespace {
     );
     $replacementArchive = $history->save([
         'recordedAt' => '2026-07-20T12:30:00+00:00',
+        'categories' => ['test' => 'modular'],
         'results' => ['test' => $historyResult],
     ], '# July replacement');
     $historyIndex = file_get_contents($historyDirectory . '/index.html');
