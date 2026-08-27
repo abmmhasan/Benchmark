@@ -207,6 +207,50 @@ function printOperations(array $results): void
     }
 }
 
+/** @param array<string, mixed> $environment */
+function targetServerMarkdown(array $environment): string
+{
+    $opcache = is_array($environment['opcache'] ?? null) ? $environment['opcache'] : [];
+    $settings = [
+        'PHP version' => $environment['phpVersion'] ?? null,
+        'PHP SAPI' => $environment['phpSapi'] ?? null,
+        'Loaded php.ini' => $environment['loadedIni'] ?? null,
+        'OPcache extension loaded' => $opcache['extensionLoaded'] ?? null,
+        'OPcache enabled for web requests' => $opcache['enabled'] ?? null,
+        'opcache.enable setting' => $opcache['enableSetting'] ?? null,
+        'opcache.enable_cli setting' => $opcache['enableCliSetting'] ?? null,
+        'OPcache JIT active' => $opcache['jitEnabled'] ?? null,
+        'OPcache JIT mode' => $opcache['jitMode'] ?? null,
+        'OPcache JIT buffer' => $opcache['jitBufferSize'] ?? null,
+        'OPcache memory consumption (MB)' => $opcache['memoryConsumption'] ?? null,
+        'OPcache interned strings buffer (MB)' => $opcache['internedStringsBuffer'] ?? null,
+        'OPcache maximum accelerated files' => $opcache['maxAcceleratedFiles'] ?? null,
+        'OPcache validates timestamps' => $opcache['validateTimestamps'] ?? null,
+        'OPcache revalidation frequency' => isset($opcache['revalidateFrequencySeconds'])
+            ? $opcache['revalidateFrequencySeconds'] . ' seconds'
+            : null,
+    ];
+    $rows = [];
+    foreach ($settings as $setting => $value) {
+        if ($value === null || $value === '') {
+            continue;
+        }
+        $display = is_bool($value) ? ($value ? 'Yes' : 'No') : (string) $value;
+        $escape = static fn(string $cell): string => str_replace(
+            ["\r", "\n", '|'],
+            ['', '<br>', '\\|'],
+            $cell,
+        );
+        $rows[] = '| ' . $escape($setting) . ' | ' . $escape($display) . ' |';
+    }
+
+    return "## Target-server environment\n\n"
+        . "These settings come from the PHP web runtime that received benchmark requests.\n\n"
+        . "| Setting | Value |\n| --- | --- |\n"
+        . implode("\n", $rows)
+        . "\n";
+}
+
 /** @param array<string, mixed> $options */
 function suite(array $options): PhpFrameworksBenchSuite
 {
@@ -464,6 +508,7 @@ try {
         $runner->concurrencyLevels(...$levels);
     }
 
+    $targetServer = $manager->serverEnvironment();
     $results = $runner->runAll();
     if (!is_array($results)) {
         throw new RuntimeException('Benchmark runner returned an unexpected result type');
@@ -472,6 +517,7 @@ try {
     if (!is_string($markdown)) {
         throw new RuntimeException('Unable to render Markdown report');
     }
+    $markdown = rtrim($markdown) . "\n\n" . targetServerMarkdown($targetServer);
 
     if (!flag($options, 'no-archive')) {
         $targetNames = array_map(static fn(BenchmarkConfig $config): string => $config->getName(), $configs);
@@ -480,6 +526,7 @@ try {
             'loadGenerator' => 'php-curl-multi',
             'suiteDirectory' => $suite->getProjectDirectory(),
             'baseUrl' => $suite->getBaseUrl(),
+            'targetServer' => $targetServer,
             'targets' => $targetNames,
             'categories' => $suite->categories($targetNames),
             'architectures' => $suite->architectures($targetNames),

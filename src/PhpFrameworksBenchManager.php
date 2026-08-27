@@ -40,17 +40,13 @@ final class PhpFrameworksBenchManager
             ];
         }
 
-        $server = ['reachable' => false, 'php' => null, 'opcache' => null, 'error' => null];
+        $server = ['reachable' => false, 'php' => null, 'opcache' => null, 'environment' => null, 'error' => null];
         try {
-            $serverText = $this->httpText($this->suite->getBaseUrl() . '/libs/php_config.php');
+            $environment = $this->serverEnvironment();
             $server['reachable'] = true;
-            foreach (preg_split('/\R/', trim($serverText)) ?: [] as $line) {
-                if (str_starts_with($line, 'PHP:')) {
-                    $server['php'] = trim(substr($line, 4));
-                } elseif (str_starts_with($line, 'OPCache:')) {
-                    $server['opcache'] = trim(substr($line, 8));
-                }
-            }
+            $server['php'] = $environment['phpVersion'] ?? null;
+            $server['opcache'] = ($environment['opcache']['enabled'] ?? false) ? 'On' : 'Off';
+            $server['environment'] = $environment;
             $disabled = trim($this->httpText($this->suite->getBaseUrl() . '/libs/php_disable_functions.php'));
             $server['fastcgiFinishRequestDisabled'] = in_array(
                 'fastcgi_finish_request',
@@ -74,6 +70,50 @@ final class PhpFrameworksBenchManager
             'server' => $server,
             'targets' => $targetChecks,
         ];
+    }
+
+    /**
+     * Read the runtime configuration from the web server that receives benchmark traffic.
+     *
+     * @return array<string, mixed>
+     */
+    public function serverEnvironment(): array
+    {
+        $text = trim($this->httpText($this->suite->getBaseUrl() . '/libs/php_config.php'));
+
+        return self::parseServerEnvironment($text);
+    }
+
+    /** @return array<string, mixed> */
+    private static function parseServerEnvironment(string $text): array
+    {
+        $decoded = json_decode($text, true);
+        if (is_array($decoded) && is_array($decoded['opcache'] ?? null)) {
+            return $decoded;
+        }
+
+        // Accept the original text fixture when benchmarking an older checked-out suite.
+        $environment = [
+            'phpVersion' => null,
+            'phpSapi' => null,
+            'loadedIni' => null,
+            'opcache' => [
+                'extensionLoaded' => null,
+                'enabled' => false,
+            ],
+        ];
+        foreach (preg_split('/\R/', $text) ?: [] as $line) {
+            if (str_starts_with($line, 'PHP:')) {
+                $environment['phpVersion'] = trim(substr($line, 4));
+            } elseif (str_starts_with($line, 'OPCache:')) {
+                $environment['opcache']['enabled'] = strcasecmp(trim(substr($line, 8)), 'On') === 0;
+            }
+        }
+        if ($environment['phpVersion'] === null) {
+            throw new RuntimeException('The benchmark server returned invalid PHP configuration data');
+        }
+
+        return $environment;
     }
 
     /**
