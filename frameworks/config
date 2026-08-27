@@ -63,3 +63,21 @@ slim:component-based
 symfony:component-based
 yii-basic:mvc-hmvc
 "
+
+# Composer package whose installed release represents each framework version.
+framework_version_packages="
+cakephp:cakephp/cakephp
+codeigniter:codeigniter4/framework
+fatfree:bcosca/fatfree-core
+flight:flightphp/core
+infbyte:infocyph/infbyte
+kumbia:kumbia/framework
+laravel:laravel/framework
+laravel-api:laravel/framework
+leaf:leafs/leaf
+lumen:laravel/lumen-framework
+nette:nette/application
+slim:slim/slim
+symfony:symfony/framework-bundle
+yii-basic:yiisoft/yii2
+"

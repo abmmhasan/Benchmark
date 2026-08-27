@@ -513,14 +513,20 @@ try {
     if (!is_array($results)) {
         throw new RuntimeException('Benchmark runner returned an unexpected result type');
     }
-    $markdown = $runner->formatResults($results, 'table');
+    $targetNames = array_map(static fn(BenchmarkConfig $config): string => $config->getName(), $configs);
+    $frameworkVersions = $suite->versions($targetNames, (string) ($targetServer['phpVersion'] ?? ''));
+    $displayResults = [];
+    foreach ($results as $name => $result) {
+        $version = $frameworkVersions[$name] ?? 'Version unavailable';
+        $displayResults["{$name} ({$version})"] = $result;
+    }
+    $markdown = $runner->formatResults($displayResults, 'table');
     if (!is_string($markdown)) {
         throw new RuntimeException('Unable to render Markdown report');
     }
     $markdown = rtrim($markdown) . "\n\n" . targetServerMarkdown($targetServer);
 
     if (!flag($options, 'no-archive')) {
-        $targetNames = array_map(static fn(BenchmarkConfig $config): string => $config->getName(), $configs);
         $payload = [
             'schemaVersion' => 2,
             'loadGenerator' => 'php-curl-multi',
@@ -530,6 +536,7 @@ try {
             'targets' => $targetNames,
             'categories' => $suite->categories($targetNames),
             'architectures' => $suite->architectures($targetNames),
+            'versions' => $frameworkVersions,
             'invocation' => [
                 'connections' => $connections,
                 'concurrencyLevels' => $levels,

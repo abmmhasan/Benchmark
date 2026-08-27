@@ -622,13 +622,16 @@ namespace {
     $suiteDirectory = sys_get_temp_dir() . '/benchmark-framework-suite-' . bin2hex(random_bytes(8));
     mkdir($suiteDirectory . '/alpha/_benchmark', 0777, true);
     mkdir($suiteDirectory . '/beta/_benchmark', 0777, true);
+    mkdir($suiteDirectory . '/alpha/asset', 0777, true);
+    mkdir($suiteDirectory . '/beta/asset/vendor/composer', 0777, true);
     mkdir($suiteDirectory . '/.docker', 0777, true);
     file_put_contents(
         $suiteDirectory . '/config',
         "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
         . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
-        . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n",
+        . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n"
+        . "framework_version_packages=\"\nalpha:vendor/alpha\nbeta:vendor/beta\n\"\n",
     );
     file_put_contents(
         $suiteDirectory . '/alpha/_benchmark/hello_world.sh',
@@ -640,6 +643,14 @@ namespace {
     );
     file_put_contents($suiteDirectory . '/alpha/_benchmark/setup.sh', "#!/bin/sh\nexit 0\n");
     file_put_contents($suiteDirectory . '/alpha/_benchmark/clean.sh', "#!/bin/sh\nexit 0\n");
+    file_put_contents($suiteDirectory . '/alpha/asset/composer.lock', json_encode([
+        'packages' => [['name' => 'vendor/alpha', 'version' => 'v3.2.1']],
+        'packages-dev' => [],
+    ], JSON_THROW_ON_ERROR));
+    file_put_contents(
+        $suiteDirectory . '/beta/asset/vendor/composer/installed.php',
+        "<?php return ['root' => ['name' => 'vendor/beta', 'pretty_version' => '2.4.0'], 'versions' => []];\n",
+    );
     file_put_contents($suiteDirectory . '/.docker/apache.dockerfile', "FROM php:8.4-apache\n");
 
     try {
@@ -656,6 +667,13 @@ namespace {
             $frameworkSuite->architectures() === ['alpha' => 'component-based', 'beta' => 'mvc-hmvc']
             && $frameworkSuite->architectures(['alpha']) === ['alpha' => 'component-based'],
             'framework architectures are imported and retain target selection',
+        );
+        $assert(
+            $frameworkSuite->versions(serverPhpVersion: '8.5.0') === [
+                'alpha' => 'v3.2.1',
+                'beta' => '2.4.0',
+            ],
+            'framework versions resolve from locked dependencies and Composer root metadata',
         );
         file_put_contents(
             $suiteDirectory . '/.benchmark-server.json',
@@ -767,11 +785,17 @@ namespace {
         unlink($suiteDirectory . '/alpha/_benchmark/clean.sh');
         unlink($suiteDirectory . '/alpha/_benchmark/hello_world.sh');
         unlink($suiteDirectory . '/beta/_benchmark/hello_world.sh');
+        unlink($suiteDirectory . '/alpha/asset/composer.lock');
+        unlink($suiteDirectory . '/beta/asset/vendor/composer/installed.php');
         unlink($suiteDirectory . '/.docker/apache.dockerfile');
         unlink($suiteDirectory . '/config');
         rmdir($suiteDirectory . '/alpha/_benchmark');
+        rmdir($suiteDirectory . '/alpha/asset');
         rmdir($suiteDirectory . '/alpha');
         rmdir($suiteDirectory . '/beta/_benchmark');
+        rmdir($suiteDirectory . '/beta/asset/vendor/composer');
+        rmdir($suiteDirectory . '/beta/asset/vendor');
+        rmdir($suiteDirectory . '/beta/asset');
         rmdir($suiteDirectory . '/beta');
         rmdir($suiteDirectory . '/.docker');
         rmdir($suiteDirectory);
@@ -827,6 +851,10 @@ namespace {
             'yii-basic' => 'mvc-hmvc',
         ],
         'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
+    );
+    $assert(
+        $bundledSuite->versions(['pure-php'], '8.5.0') === ['pure-php' => 'PHP 8.5.0'],
+        'the Pure PHP baseline displays the benchmark server PHP version',
     );
     $assert(
         $bundledSuite->configs(['symfony'])[0]->getUrl()
@@ -924,6 +952,7 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# First');
     $historyResult['peak']['req_per_min'] *= 1.10;
@@ -932,6 +961,7 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# Second');
     $assert(count($history->entries()) === 2, 'benchmark history lists archived runs');
@@ -972,6 +1002,9 @@ namespace {
         && str_contains($dashboard, 'decorateTargetCells')
         && str_contains($dashboard, 'categoryMap')
         && str_contains($dashboard, 'architectureMap')
+        && str_contains($dashboard, 'versionMap')
+        && str_contains($dashboard, 'badge-version')
+        && str_contains($dashboard, 'v3.2.1')
         && str_contains($dashboard, 'Target-server environment')
         && str_contains($dashboard, 'OPcache enabled for web requests')
         && str_contains($dashboard, 'CLI OPcache enabled')
@@ -991,6 +1024,7 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# July replacement');
     $historyIndex = file_get_contents($historyDirectory . '/index.html');

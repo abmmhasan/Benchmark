@@ -116,17 +116,41 @@ final class PhpFrameworksBenchSuite
     }
 
     /**
+     * Return installed framework releases keyed by target name.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function versions(array $targets = [], ?string $serverPhpVersion = null): array
+    {
+        $selected = $this->selectTargets($targets);
+        $packages = $this->versionPackages();
+        $versions = [];
+        foreach ($selected as $target) {
+            if ($target === 'pure-php') {
+                $versions[$target] = $serverPhpVersion === null || $serverPhpVersion === ''
+                    ? 'PHP'
+                    : 'PHP ' . $serverPhpVersion;
+                continue;
+            }
+
+            $package = $packages[$target] ?? null;
+            $versions[$target] = is_string($package)
+                ? ($this->installedPackageVersion($target, $package) ?? 'Version unavailable')
+                : 'Version unavailable';
+        }
+
+        return $versions;
+    }
+
+    /**
      * @param list<string> $targets
      * @return array<string, string>
      */
     private function classifications(string $configKey, array $targets): array
     {
         $available = $this->targets();
-        $selected = $targets === [] ? $available : array_values($targets);
-        $unknown = array_values(array_diff($selected, $available));
-        if ($unknown !== []) {
-            throw new InvalidArgumentException('Unknown framework target(s): ' . implode(', ', $unknown));
-        }
+        $selected = $this->selectTargets($targets);
 
         $classifications = array_fill_keys($available, 'uncategorized');
         $pattern = '/^' . preg_quote($configKey, '/') . '\s*=\s*"(?<definitions>.*?)"\s*$/ms';
@@ -143,6 +167,95 @@ final class PhpFrameworksBenchSuite
         }
 
         return array_intersect_key($classifications, array_flip($selected));
+    }
+
+    /** @param list<string> $targets @return list<string> */
+    private function selectTargets(array $targets): array
+    {
+        $available = $this->targets();
+        $selected = $targets === [] ? $available : array_values($targets);
+        $unknown = array_values(array_diff($selected, $available));
+        if ($unknown !== []) {
+            throw new InvalidArgumentException('Unknown framework target(s): ' . implode(', ', $unknown));
+        }
+
+        return $selected;
+    }
+
+    /** @return array<string, string> */
+    private function versionPackages(): array
+    {
+        if (preg_match('/^framework_version_packages\s*=\s*"(?<definitions>.*?)"\s*$/ms', $this->config, $match) !== 1) {
+            return [];
+        }
+        $packages = [];
+        $definitions = preg_split('/\s+/', trim($match['definitions']), flags: PREG_SPLIT_NO_EMPTY);
+        foreach (is_array($definitions) ? $definitions : [] as $definition) {
+            if (preg_match('/^(?<target>[a-zA-Z0-9][a-zA-Z0-9._-]*):(?<package>[a-z0-9_.-]+\/[a-z0-9_.-]+)$/', $definition, $parts) !== 1) {
+                throw new RuntimeException("Invalid framework_version_packages definition: {$definition}");
+            }
+            $packages[$parts['target']] = $parts['package'];
+        }
+
+        return $packages;
+    }
+
+    private function installedPackageVersion(string $target, string $package): ?string
+    {
+        $asset = $this->projectDirectory . '/' . $target . '/asset';
+        $lock = self::readJson($asset . '/composer.lock');
+        foreach ([...($lock['packages'] ?? []), ...($lock['packages-dev'] ?? [])] as $installed) {
+            if (is_array($installed) && ($installed['name'] ?? null) === $package) {
+                return self::cleanVersion($installed['pretty_version'] ?? $installed['version'] ?? null);
+            }
+        }
+
+        $installedPhp = $asset . '/vendor/composer/installed.php';
+        if (!is_file($installedPhp)) {
+            return null;
+        }
+        $metadata = require $installedPhp;
+        if (!is_array($metadata)) {
+            return null;
+        }
+        $sets = isset($metadata['root']) ? [$metadata] : $metadata;
+        foreach ($sets as $set) {
+            if (!is_array($set)) {
+                continue;
+            }
+            $root = $set['root'] ?? null;
+            if (is_array($root) && ($root['name'] ?? null) === $package) {
+                return self::cleanVersion($root['pretty_version'] ?? $root['version'] ?? null);
+            }
+            $versions = $set['versions'] ?? [];
+            if (is_array($versions) && is_array($versions[$package] ?? null)) {
+                return self::cleanVersion(
+                    $versions[$package]['pretty_version'] ?? $versions[$package]['version'] ?? null,
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /** @return array<string, mixed> */
+    private static function readJson(string $file): array
+    {
+        if (!is_file($file)) {
+            return [];
+        }
+        $decoded = json_decode((string) file_get_contents($file), true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private static function cleanVersion(mixed $version): ?string
+    {
+        if (!is_string($version) || trim($version) === '') {
+            return null;
+        }
+
+        return trim($version);
     }
 
     /**

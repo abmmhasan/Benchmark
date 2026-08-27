@@ -145,7 +145,8 @@ Browser reports display dates using the visitor's locale and time zone; CLI
 history listings use a human-readable UTC format. Pass `--no-archive` to disable
 files. Each artifact records the target web server's PHP version, SAPI, loaded
 configuration, and actual OPcache/JIT settings separately from the CLI load
-generator environment.
+generator environment. Installed framework releases are resolved from Composer
+metadata and displayed beside framework names in the dashboard.
 
 The `Framework benchmarks` GitHub Actions workflow runs on day 1 of every month,
 after non-docs changes land on `main`, or manually. It uses a 10% RPM stability
