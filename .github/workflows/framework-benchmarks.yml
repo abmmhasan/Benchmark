@@ -54,6 +54,10 @@ jobs:
       - name: Run framework benchmarks
         run: composer benchmark:frameworks -- run --output=docs --stability=10 --history-limit=61 --replace-monthly
 
+      - name: Show benchmark server errors
+        if: failure()
+        run: docker logs --tail 200 benchmark-frameworks-apache || true
+
       - name: Stop benchmark server
         if: always()
         run: |

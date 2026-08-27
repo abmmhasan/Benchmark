@@ -159,6 +159,7 @@ optimize_production() {
             ;;
         infbyte)
             php "$asset_dir/infbyte" optimize
+            chmod -R a+rX "$asset_dir/bootstrap/cache"
             ;;
         laravel|laravel-api)
             php "$asset_dir/artisan" optimize
@@ -211,7 +212,11 @@ clear_cache() {
     case "$target" in
         cakephp) php "$asset_dir/bin/cake.php" cache clear_all ;;
         codeigniter) clear_directory "$asset_dir/writable/cache" ;;
-        infbyte) php "$asset_dir/infbyte" optimize:clear; php "$asset_dir/infbyte" optimize ;;
+        infbyte)
+            php "$asset_dir/infbyte" optimize:clear
+            php "$asset_dir/infbyte" optimize
+            chmod -R a+rX "$asset_dir/bootstrap/cache"
+            ;;
         kumbia) clear_directory "$asset_dir/default/app/tmp/cache" ;;
         laravel|laravel-api) php "$asset_dir/artisan" optimize:clear; php "$asset_dir/artisan" optimize ;;
         nette) clear_directory "$asset_dir/temp/cache" ;;

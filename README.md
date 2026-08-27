@@ -56,9 +56,10 @@ Every generated application that uses Composer is installed with `--no-dev` and
 an authoritative classmap. The lifecycle applies a predefined production
 environment for each framework before running its supported cache/optimization
 commands.
-The Docker server also exports production environment variables, uses
-`php.ini-production`, disables displayed errors, and enables OPcache. Reports
-record the active benchmark environment profile under target-server details.
+The Docker server exports the shared benchmark-profile marker, uses
+`php.ini-production`, disables displayed errors, and enables OPcache. Framework
+environment variables remain target-specific so one framework cannot override
+another. Reports record the active profile under target-server details.
 
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
 `infbyte`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
