@@ -215,6 +215,7 @@ function targetServerMarkdown(array $environment): string
         'PHP version' => $environment['phpVersion'] ?? null,
         'PHP SAPI' => $environment['phpSapi'] ?? null,
         'Loaded php.ini' => $environment['loadedIni'] ?? null,
+        'Benchmark environment profile' => $environment['benchmarkProfile'] ?? null,
         'OPcache extension loaded' => $opcache['extensionLoaded'] ?? null,
         'OPcache enabled for web requests' => $opcache['enabled'] ?? null,
         'opcache.enable setting' => $opcache['enableSetting'] ?? null,

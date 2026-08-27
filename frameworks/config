@@ -18,7 +18,6 @@ kumbia
 laravel
 laravel-api
 leaf
-lumen
 nette
 pure-php
 slim
@@ -37,7 +36,6 @@ kumbia:full-stack
 laravel:full-stack
 laravel-api:full-stack
 leaf:micro
-lumen:micro
 nette:full-stack
 pure-php:baseline
 slim:micro
@@ -56,7 +54,6 @@ kumbia:mvc-hmvc
 laravel:mvc-hmvc
 laravel-api:mvc-hmvc
 leaf:component-based
-lumen:mvc-hmvc
 nette:component-based
 pure-php:baseline
 slim:component-based
@@ -75,7 +72,6 @@ kumbia:kumbia/framework
 laravel:laravel/framework
 laravel-api:laravel/framework
 leaf:leafs/leaf
-lumen:laravel/lumen-framework
 nette:nette/application
 slim:slim/slim
 symfony:symfony/framework-bundle

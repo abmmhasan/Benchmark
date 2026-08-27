@@ -9,12 +9,19 @@ $iniBoolean = static fn(string $name): bool => filter_var(
 $opcacheStatus = function_exists('opcache_get_status') ? opcache_get_status(false) : false;
 $opcacheStatus = is_array($opcacheStatus) ? $opcacheStatus : [];
 $jitStatus = is_array($opcacheStatus['jit'] ?? null) ? $opcacheStatus['jit'] : [];
+$profileFile = dirname(__DIR__) . '/.benchmark-profile';
+$benchmarkProfile = getenv('BENCHMARK_ENVIRONMENT') ?: null;
+if ($benchmarkProfile === null && is_file($profileFile)) {
+    $storedProfile = trim((string) file_get_contents($profileFile));
+    $benchmarkProfile = $storedProfile === '' ? null : $storedProfile;
+}
 
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode([
     'phpVersion' => PHP_VERSION,
     'phpSapi' => PHP_SAPI,
     'loadedIni' => php_ini_loaded_file() ?: null,
+    'benchmarkProfile' => $benchmarkProfile,
     'opcache' => [
         'extensionLoaded' => extension_loaded('Zend OPcache'),
         'enabled' => (bool) ($opcacheStatus['opcache_enabled'] ?? false),
