@@ -817,7 +817,7 @@ namespace {
         'http://127.0.0.1:8080/frameworks',
     );
     $bundledTargets = [
-        'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'kumbia', 'laravel',
+        'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'nette', 'pure-php', 'slim', 'symfony',
         'yii-basic',
     ];
@@ -829,6 +829,7 @@ namespace {
             'fatfree' => 'micro',
             'flight' => 'micro',
             'infbyte' => 'full-stack',
+            'infbyte-full' => 'full-stack',
             'kumbia' => 'full-stack',
             'laravel' => 'full-stack',
             'laravel-api' => 'full-stack',
@@ -848,6 +849,7 @@ namespace {
             'fatfree' => 'mvc-hmvc',
             'flight' => 'component-based',
             'infbyte' => 'component-based',
+            'infbyte-full' => 'component-based',
             'kumbia' => 'mvc-hmvc',
             'laravel' => 'mvc-hmvc',
             'laravel-api' => 'mvc-hmvc',
@@ -916,6 +918,10 @@ namespace {
     $assert(
         is_string($lifecycleSource)
         && str_contains($lifecycleSource, 'configure_production_environment')
+        && str_contains($lifecycleSource, 'install_all_infbyte_modules')
+        && str_contains($lifecycleSource, 'module:list --json --no-interaction')
+        && str_contains($lifecycleSource, 'module:config:publish "$module" --no-interaction')
+        && str_contains($lifecycleSource, 'module:schema:sync --no-interaction')
         && str_contains($lifecycleSource, 'CI_ENVIRONMENT production')
         && str_contains($lifecycleSource, 'APP_ENV prod')
         && str_contains($lifecycleSource, 'printf \'production\n\' > "$suite_dir/.benchmark-profile"')

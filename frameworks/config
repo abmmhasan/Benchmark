@@ -14,6 +14,7 @@ codeigniter
 fatfree
 flight
 infbyte
+infbyte-full
 kumbia
 laravel
 laravel-api
@@ -32,6 +33,7 @@ codeigniter:full-stack
 fatfree:micro
 flight:micro
 infbyte:full-stack
+infbyte-full:full-stack
 kumbia:full-stack
 laravel:full-stack
 laravel-api:full-stack
@@ -50,6 +52,7 @@ codeigniter:mvc-hmvc
 fatfree:mvc-hmvc
 flight:component-based
 infbyte:component-based
+infbyte-full:component-based
 kumbia:mvc-hmvc
 laravel:mvc-hmvc
 laravel-api:mvc-hmvc
@@ -68,6 +71,7 @@ codeigniter:codeigniter4/framework
 fatfree:bcosca/fatfree-core
 flight:flightphp/core
 infbyte:infocyph/infbyte
+infbyte-full:infocyph/infbyte
 kumbia:kumbia/framework
 laravel:laravel/framework
 laravel-api:laravel/framework
