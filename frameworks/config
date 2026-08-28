@@ -23,6 +23,8 @@ nette
 pure-php
 slim
 symfony
+webrick-sharded
+webrick-fused
 yii-basic
 "
 
@@ -42,6 +44,8 @@ nette:full-stack
 pure-php:baseline
 slim:micro
 symfony:full-stack
+webrick-sharded:micro
+webrick-fused:micro
 yii-basic:full-stack
 "
 
@@ -61,6 +65,8 @@ nette:component-based
 pure-php:baseline
 slim:component-based
 symfony:component-based
+webrick-sharded:component-based
+webrick-fused:component-based
 yii-basic:mvc-hmvc
 "
 
@@ -79,5 +85,7 @@ leaf:leafs/leaf
 nette:nette/application
 slim:slim/slim
 symfony:symfony/framework-bundle
+webrick-sharded:infocyph/webrick
+webrick-fused:infocyph/webrick
 yii-basic:yiisoft/yii2
 "
