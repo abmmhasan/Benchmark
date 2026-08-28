@@ -63,13 +63,18 @@ another. Reports record the active profile under target-server details.
 
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
 `infbyte`, `infbyte-full`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
-`pure-php`, `slim`, `symfony`, and `yii-basic`. The API target remains separate
+`pure-php`, `slim`, `symfony`, `webrick-sharded`, `webrick-fused`, and
+`yii-basic`. The API target remains separate
 because it measures Laravel's API routing/JSON response path rather than its web
 route. `infbyte` measures the minimal skeleton, while `infbyte-full` installs
 every module advertised by the selected stable InfByte release. Dashboard
 classifications are defined in `frameworks/config`: Full Stack
 or Micro by framework type, and MVC/HMVC or Component-Based by architecture.
 Pure PHP remains a separate comparison baseline.
+
+The two Webrick targets use the same cached route and production kernel. The
+sharded target loads Webrick's directory-based cache; the fused target loads
+its single-file cache, so their results isolate the matcher strategy.
 
 ### Run all targets
 

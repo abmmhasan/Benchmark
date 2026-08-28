@@ -819,7 +819,7 @@ namespace {
     $bundledTargets = [
         'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'nette', 'pure-php', 'slim', 'symfony',
-        'yii-basic',
+        'webrick-sharded', 'webrick-fused', 'yii-basic',
     ];
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
     $assert(
@@ -838,6 +838,8 @@ namespace {
             'pure-php' => 'baseline',
             'slim' => 'micro',
             'symfony' => 'full-stack',
+            'webrick-sharded' => 'micro',
+            'webrick-fused' => 'micro',
             'yii-basic' => 'full-stack',
         ],
         'bundled framework categories cover full-stack, micro, and baseline targets',
@@ -858,6 +860,8 @@ namespace {
             'pure-php' => 'baseline',
             'slim' => 'component-based',
             'symfony' => 'component-based',
+            'webrick-sharded' => 'component-based',
+            'webrick-fused' => 'component-based',
             'yii-basic' => 'mvc-hmvc',
         ],
         'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
@@ -974,6 +978,24 @@ namespace {
         && str_contains($flightFrontController, "->router()->get('/index.php/hello/index'")
         && !str_contains($flightFrontController, 'app/config/bootstrap.php'),
         'Flight benchmark uses a minimal framework boot without skeleton session overhead',
+    );
+    $webrickFrontController = file_get_contents(
+        $bundledSuiteDirectory . '/_support/webrick/public/index.php',
+    );
+    $assert(
+        is_string($webrickFrontController)
+        && str_contains($webrickFrontController, "'fused' => FusedMatcher::make()")
+        && str_contains($webrickFrontController, "'sharded' => ShardedMatcher::make()")
+        && str_contains($webrickFrontController, "'/hello/index'") === false
+        && str_contains($lifecycleSource, '--matcher="$matcher" --cache="$cache"')
+        && str_contains($lifecycleSource, '--routes="$asset_dir/routes.php" --alias-fallback=0')
+        && trim((string) file_get_contents(
+            $bundledSuiteDirectory . '/webrick-sharded/_benchmark/overlay/matcher.php',
+        )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'sharded';"
+        && trim((string) file_get_contents(
+            $bundledSuiteDirectory . '/webrick-fused/_benchmark/overlay/matcher.php',
+        )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'fused';",
+        'Webrick targets share one route and isolate the sharded and fused production matchers',
     );
 
     $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));
