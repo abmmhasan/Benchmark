@@ -27,7 +27,7 @@ case "$target" in
     codeigniter) package="codeigniter4/appstarter" ;;
     fatfree) package="bcosca/fatfree-core" ;;
     flight) package="flightphp/skeleton" ;;
-    infbyte) package="infocyph/infbyte" ;;
+    infbyte|infbyte-full) package="infocyph/infbyte" ;;
     kumbia) package="kumbia/framework" ;;
     laravel|laravel-api) package="laravel/laravel" ;;
     leaf) package="leafs/leaf" ;;
@@ -62,8 +62,12 @@ clear_directory() {
 }
 
 apply_overlay() {
-    if [[ -d "$benchmark_dir/overlay" ]]; then
-        cp -a "$benchmark_dir/overlay/." "$asset_dir/"
+    local overlay_dir="$benchmark_dir/overlay"
+    if [[ "$target" == 'infbyte-full' ]]; then
+        overlay_dir="$suite_dir/infbyte/_benchmark/overlay"
+    fi
+    if [[ -d "$overlay_dir" ]]; then
+        cp -a "$overlay_dir/." "$asset_dir/"
     fi
 }
 
@@ -96,7 +100,7 @@ configure_production_environment() {
             set_env_value "$asset_dir/.env" APP_ENV production
             set_env_value "$asset_dir/.env" APP_DEBUG false
             ;;
-        infbyte|laravel|laravel-api)
+        infbyte|infbyte-full|laravel|laravel-api)
             set_env_value "$asset_dir/.env" APP_ENV production
             set_env_value "$asset_dir/.env" APP_DEBUG false
             ;;
@@ -108,6 +112,63 @@ configure_production_environment() {
             # These fixtures define production behavior directly in their overlays.
             ;;
     esac
+}
+
+install_all_infbyte_modules() {
+    local manifest
+    local module
+    local -a modules=()
+    local -a packages=()
+
+    manifest="$(php "$asset_dir/infbyte" module:list --json --no-interaction)"
+    mapfile -t modules < <(php -r '
+        $modules = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+        foreach ($modules as $module) {
+            if (is_array($module) && is_string($module["name"] ?? null)) {
+                echo $module["name"], PHP_EOL;
+            }
+        }
+    ' <<< "$manifest")
+    mapfile -t packages < <(php -r '
+        $modules = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+        foreach ($modules as $module) {
+            foreach (is_array($module["packages"] ?? null) ? $module["packages"] : [] as $package => $metadata) {
+                $constraint = is_array($metadata) ? ($metadata["constraint"] ?? null) : null;
+                if (is_string($package) && is_string($constraint)) {
+                    echo $package, ":", $constraint, PHP_EOL;
+                }
+            }
+        }
+    ' <<< "$manifest")
+
+    if [[ "${#modules[@]}" -eq 0 ]]; then
+        printf 'InfByte did not advertise any installable modules\n' >&2
+        exit 1
+    fi
+    if [[ "${#packages[@]}" -gt 0 ]]; then
+        composer --working-dir="$asset_dir" require --prefer-dist --no-interaction \
+            --update-no-dev --classmap-authoritative --no-progress --with-all-dependencies \
+            "${packages[@]}"
+    fi
+    for module in "${modules[@]}"; do
+        php "$asset_dir/infbyte" module:config:publish "$module" --no-interaction
+    done
+    php "$asset_dir/infbyte" module:schema:sync --no-interaction
+
+    manifest="$(php "$asset_dir/infbyte" module:list --json --no-interaction)"
+    php -r '
+        $modules = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+        $missing = [];
+        foreach ($modules as $module) {
+            if (is_array($module) && ($module["installed"] ?? false) !== true) {
+                $missing[] = (string) ($module["name"] ?? "unknown");
+            }
+        }
+        if ($missing !== []) {
+            fwrite(STDERR, "InfByte modules not installed: " . implode(", ", $missing) . PHP_EOL);
+            exit(1);
+        }
+    ' <<< "$manifest"
 }
 
 prepare_runtime_directories() {
@@ -123,7 +184,7 @@ prepare_runtime_directories() {
         flight)
             chmod -R a+rwX "$asset_dir/app/cache" "$asset_dir/app/log"
             ;;
-        infbyte)
+        infbyte|infbyte-full)
             rm -f -- "$asset_dir/public/.htaccess"
             chmod a+r "$asset_dir/.env"
             chmod -R a+rwX "$asset_dir/bootstrap/cache" "$asset_dir/storage"
@@ -161,7 +222,7 @@ optimize_production() {
         codeigniter)
             php "$asset_dir/spark" optimize
             ;;
-        infbyte)
+        infbyte|infbyte-full)
             php "$asset_dir/infbyte" optimize
             chmod -R a+rX "$asset_dir/bootstrap/cache"
             ;;
@@ -220,6 +281,9 @@ setup_project() {
 
     apply_overlay
     configure_production_environment
+    if [[ "$target" == 'infbyte-full' ]]; then
+        install_all_infbyte_modules
+    fi
     printf 'production\n' > "$suite_dir/.benchmark-profile"
 
     if [[ -f "$asset_dir/composer.json" ]]; then
@@ -236,7 +300,7 @@ clear_cache() {
     case "$target" in
         cakephp) php "$asset_dir/bin/cake.php" cache clear_all ;;
         codeigniter) clear_directory "$asset_dir/writable/cache" ;;
-        infbyte)
+        infbyte|infbyte-full)
             php "$asset_dir/infbyte" optimize:clear
             php "$asset_dir/infbyte" optimize
             chmod -R a+rX "$asset_dir/bootstrap/cache"
