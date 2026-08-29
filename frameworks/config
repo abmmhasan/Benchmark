@@ -30,8 +30,8 @@ webrick-fused
 yii-basic
 "
 
-# Execution model. The profiles are benchmarked and published separately:
-# request-per-process Apache with OPcache, or a persistent Swoole worker.
+# Supported execution models. "both" targets are benchmarked in each separately
+# published profile: Apache with OPcache and native persistent Swoole workers.
 framework_runtimes="
 cakephp:opcache
 codeigniter:opcache
@@ -39,18 +39,18 @@ fatfree:opcache
 fast-route:opcache
 flight:opcache
 hyperf:swoole
-infbyte:opcache
-infbyte-full:opcache
+infbyte:both
+infbyte-full:both
 kumbia:opcache
-laravel:opcache
-laravel-api:opcache
+laravel:both
+laravel-api:both
 leaf:opcache
 nette:opcache
 pure-php:opcache
 slim:opcache
-symfony:opcache
-webrick-sharded:opcache
-webrick-fused:opcache
+symfony:both
+webrick-sharded:both
+webrick-fused:both
 yii-basic:opcache
 "
 
@@ -155,8 +155,8 @@ fatfree:bcosca/fatfree-core
 fast-route:nikic/fast-route
 flight:flightphp/core
 hyperf:hyperf/framework
-infbyte:infocyph/infbyte
-infbyte-full:infocyph/infbyte
+infbyte:infocyph/foundation
+infbyte-full:infocyph/foundation
 kumbia:kumbia/framework
 laravel:laravel/framework
 laravel-api:laravel/framework

@@ -629,7 +629,7 @@ namespace {
         $suiteDirectory . '/config',
         "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
-        . "framework_runtimes=\"\nalpha:opcache\nbeta:swoole\n\"\n"
+        . "framework_runtimes=\"\nalpha:opcache\nbeta:both\n\"\n"
         . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
         . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n"
         . "framework_built_in_di=\"\nalpha:yes\nbeta:no\n\"\n"
@@ -662,10 +662,11 @@ namespace {
         $frameworkSuite = new PhpFrameworksBenchSuite($suiteDirectory);
         $assert($frameworkSuite->targets() === ['alpha', 'beta'], 'framework targets follow suite config order');
         $assert(
-            $frameworkSuite->runtimes() === ['alpha' => 'opcache', 'beta' => 'swoole']
-            && $frameworkSuite->targetsForRuntime('opcache') === ['alpha']
-            && $frameworkSuite->targetsForRuntime('swoole') === ['beta'],
-            'framework targets are partitioned into explicit runtime profiles',
+            $frameworkSuite->runtimes() === ['alpha' => 'opcache', 'beta' => 'both']
+            && $frameworkSuite->targetsForRuntime('opcache') === ['alpha', 'beta']
+            && $frameworkSuite->targetsForRuntime('swoole') === ['beta']
+            && $frameworkSuite->targetsForRuntime('opcache') !== $frameworkSuite->targetsForRuntime('swoole'),
+            'framework targets support explicit and dual runtime profiles',
         );
         $assert($frameworkSuite->getSuggestedConcurrency() === 42, 'suite connection default is imported');
         $assert($frameworkSuite->getSuggestedDuration() === 17, 'suite duration default is imported');
@@ -794,6 +795,7 @@ namespace {
             $dockerPlan[0]['command'][0] === 'docker'
             && $dockerPlan[1]['status'] === 'dry-run'
             && in_array('127.0.0.1::80', $dockerPlan[1]['command'], true)
+            && in_array($suiteDirectory . ':' . $suiteDirectory . ':rw', $dockerPlan[1]['command'], true)
             && $dockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-apache', '80/tcp']
             && !is_file($suiteDirectory . '/.benchmark-server.json'),
             'Docker Apache lets Docker allocate a loopback port and supports dry-run',
@@ -805,10 +807,11 @@ namespace {
         );
         $swooleDockerPlan = $frameworkManager->dockerSwoole(dryRun: true);
         $assert(
-            in_array('127.0.0.1::9501', $swooleDockerPlan[1]['command'], true)
+            in_array('127.0.0.1::9500', $swooleDockerPlan[1]['command'], true)
             && in_array($suiteDirectory . ':/app/frameworks:rw', $swooleDockerPlan[1]['command'], true)
+            && in_array($suiteDirectory . ':' . $suiteDirectory . ':rw', $swooleDockerPlan[1]['command'], true)
             && in_array('--user', $swooleDockerPlan[1]['command'], true)
-            && $swooleDockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-swoole', '9501/tcp'],
+            && $swooleDockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-swoole', '9500/tcp'],
             'Docker Swoole uses an ephemeral loopback port and persistent-worker mount',
         );
         $dockerStopPlan = $frameworkManager->stopDockerApache(dryRun: true);
@@ -852,10 +855,15 @@ namespace {
     ];
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
     $assert(
-        $bundledSuite->targetsForRuntime('swoole') === ['hyperf']
+        $bundledSuite->targetsForRuntime('swoole') === [
+            'hyperf', 'infbyte', 'infbyte-full', 'laravel', 'laravel-api',
+            'symfony', 'webrick-sharded', 'webrick-fused',
+        ]
         && !in_array('hyperf', $bundledSuite->targetsForRuntime('opcache'), true)
+        && in_array('infbyte', $bundledSuite->targetsForRuntime('opcache'), true)
+        && in_array('infbyte-full', $bundledSuite->targetsForRuntime('opcache'), true)
         && count($bundledSuite->targetsForRuntime('opcache')) === 18,
-        'bundled targets keep OPcache and Swoole result sets separate',
+        'bundled targets support native dual-runtime InfByte comparisons',
     );
     $assert(
         $bundledSuite->categories() === [
@@ -1046,8 +1054,35 @@ namespace {
         && str_contains($swooleDockerSource, 'pecl install swoole')
         && str_contains($swooleDockerSource, 'opcache.enable_cli=0')
         && str_contains($swooleDockerSource, 'BENCHMARK_ENVIRONMENT=swoole-production')
-        && str_contains($swooleDockerSource, 'php", "bin/hyperf.php", "start'),
-        'Swoole Docker runs Hyperf as a production persistent worker without CLI OPcache',
+        && str_contains($swooleDockerSource, 'nginx')
+        && str_contains($swooleDockerSource, 'benchmark-swoole'),
+        'Swoole Docker runs production persistent workers behind a common gateway without CLI OPcache',
+    );
+    $infbyteSwooleSource = file_get_contents($bundledSuiteDirectory . '/_support/swoole/infbyte-server.php');
+    $swooleEntrypointSource = file_get_contents($bundledSuiteDirectory . '/.docker/swoole/entrypoint.sh');
+    $assert(
+        is_string($infbyteSwooleSource)
+        && str_contains($infbyteSwooleSource, "withAttribute('swoole.response'")
+        && str_contains($infbyteSwooleSource, 'new SwooleEmitter()')
+        && str_contains($infbyteSwooleSource, '$application->handle($request)')
+        && is_string($swooleEntrypointSource)
+        && substr_count($swooleEntrypointSource, 'infbyte-server.php') === 2,
+        'both InfByte fixtures use the native Webrick Swoole emitter and persistent application kernel',
+    );
+    $webrickSwooleSource = file_get_contents($bundledSuiteDirectory . '/_support/swoole/webrick-server.php');
+    $swooleGatewaySource = file_get_contents($bundledSuiteDirectory . '/.docker/swoole/nginx.conf');
+    $assert(
+        is_string($webrickSwooleSource)
+        && str_contains($webrickSwooleSource, 'RouterKernel::bootWithRegistrar')
+        && str_contains($webrickSwooleSource, 'new SwooleEmitter()')
+        && is_string($swooleEntrypointSource)
+        && str_contains($swooleEntrypointSource, 'octane:start --server=swoole')
+        && str_contains($swooleEntrypointSource, "APP_RUNTIME='Runtime\\Swoole\\Runtime'")
+        && is_string($swooleGatewaySource)
+        && str_contains($swooleGatewaySource, 'upstream webrick_sharded')
+        && str_contains($swooleGatewaySource, 'upstream laravel_api')
+        && str_contains($swooleGatewaySource, 'upstream symfony'),
+        'Webrick, Laravel, Laravel API, and Symfony use their native persistent-runtime adapters behind the shared gateway',
     );
     $workflowSource = file_get_contents(dirname(__DIR__) . '/.github/workflows/framework-benchmarks.yml');
     $assert(

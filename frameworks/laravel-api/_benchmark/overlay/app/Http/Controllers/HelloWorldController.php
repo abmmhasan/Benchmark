@@ -13,4 +13,3 @@ class HelloWorldController extends Controller {
         ], 200);
     }
 }
-

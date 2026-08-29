@@ -2,7 +2,7 @@ FROM php:8.5-cli
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        $PHPIZE_DEPS curl git libcurl4-openssl-dev libicu-dev libonig-dev libzip-dev unzip \
+        $PHPIZE_DEPS curl git libcurl4-openssl-dev libicu-dev libonig-dev libzip-dev nginx unzip \
     && docker-php-ext-install bcmath curl intl mbstring pcntl pdo_mysql sockets zip \
     && MAKEFLAGS="-j2" pecl install swoole \
     && docker-php-ext-enable swoole \
@@ -18,9 +18,14 @@ ENV APP_ENV=prod \
     SCAN_CACHEABLE=true \
     BENCHMARK_ENVIRONMENT=swoole-production
 
-WORKDIR /app/frameworks/hyperf/asset
+COPY .docker/swoole/nginx.conf /etc/nginx/nginx.conf
+COPY .docker/swoole/entrypoint.sh /usr/local/bin/benchmark-swoole
 
-EXPOSE 9501
+RUN chmod 0755 /usr/local/bin/benchmark-swoole
+
+WORKDIR /app/frameworks
+
+EXPOSE 9500
 
 ENTRYPOINT []
-CMD ["php", "bin/hyperf.php", "start"]
+CMD ["/usr/local/bin/benchmark-swoole"]
