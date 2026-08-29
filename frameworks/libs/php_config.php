@@ -22,6 +22,12 @@ echo json_encode([
     'phpSapi' => PHP_SAPI,
     'loadedIni' => php_ini_loaded_file() ?: null,
     'benchmarkProfile' => $benchmarkProfile,
+    'runtime' => [
+        'profile' => 'opcache',
+        'extensionLoaded' => false,
+        'extensionVersion' => null,
+        'persistentWorker' => false,
+    ],
     'opcache' => [
         'extensionLoaded' => extension_loaded('Zend OPcache'),
         'enabled' => (bool) ($opcacheStatus['opcache_enabled'] ?? false),

@@ -28,6 +28,7 @@ case "$target" in
     fatfree) package="bcosca/fatfree-core" ;;
     fast-route) package="nikic/fast-route" ;;
     flight) package="flightphp/skeleton" ;;
+    hyperf) package="hyperf/hyperf-skeleton" ;;
     infbyte|infbyte-full) package="infocyph/infbyte" ;;
     kumbia) package="kumbia/framework" ;;
     laravel|laravel-api) package="laravel/laravel" ;;
@@ -107,6 +108,13 @@ configure_production_environment() {
         flight)
             set_env_value "$asset_dir/.env" APP_ENV production
             set_env_value "$asset_dir/.env" APP_DEBUG false
+            ;;
+        hyperf)
+            if [[ ! -f "$asset_dir/.env" && -f "$asset_dir/.env.example" ]]; then
+                cp "$asset_dir/.env.example" "$asset_dir/.env"
+            fi
+            set_env_value "$asset_dir/.env" APP_ENV prod
+            set_env_value "$asset_dir/.env" SCAN_CACHEABLE true
             ;;
         infbyte|infbyte-full|laravel|laravel-api)
             set_env_value "$asset_dir/.env" APP_ENV production
@@ -230,6 +238,25 @@ strip_fast_route_development_requirements() {
     rm -f -- "$asset_dir/composer.lock"
 }
 
+strip_hyperf_installer() {
+    php -r '
+        $file = $argv[1];
+        $manifest = json_decode(file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
+        unset($manifest["require-dev"], $manifest["autoload-dev"]);
+        unset($manifest["autoload"]["psr-4"]["Installer\\"]);
+        foreach (["pre-install-cmd", "pre-update-cmd", "test", "cs-fix", "analyse"] as $script) {
+            unset($manifest["scripts"][$script]);
+        }
+        $manifest["minimum-stability"] = "stable";
+        file_put_contents(
+            $file,
+            json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL,
+        );
+    ' "$asset_dir/composer.json"
+    rm -rf -- "$asset_dir/installer" "$asset_dir/test" "$asset_dir/tests"
+    rm -f -- "$asset_dir/composer.lock"
+}
+
 prepare_runtime_directories() {
     case "$target" in
         cakephp)
@@ -242,6 +269,11 @@ prepare_runtime_directories() {
             ;;
         flight)
             chmod -R a+rwX "$asset_dir/app/cache" "$asset_dir/app/log"
+            ;;
+        hyperf)
+            chmod a+r "$asset_dir/.env"
+            mkdir -p -- "$asset_dir/runtime/container"
+            chmod -R a+rwX "$asset_dir/runtime"
             ;;
         fast-route)
             rm -f -- "$asset_dir/public/.htaccess"
@@ -301,6 +333,9 @@ optimize_production() {
             composer --working-dir="$asset_dir" dump-env prod --ansi
             APP_ENV=prod APP_DEBUG=0 php "$asset_dir/bin/console" cache:clear --no-debug
             ;;
+        hyperf)
+            composer --working-dir="$asset_dir" dump-autoload --no-dev --classmap-authoritative --no-interaction
+            ;;
         webrick-sharded|webrick-fused)
             rebuild_webrick_route_cache
             ;;
@@ -323,6 +358,11 @@ setup_project() {
         project_version_log="$target_dir/.benchmark-create-project.log"
         if [[ "$target" == 'fast-route' ]]; then
             create_project_options+=(--no-install)
+        fi
+        if [[ "$target" == 'hyperf' ]]; then
+            # The skeleton's interactive installer enables Redis/database by
+            # default under --no-interaction. Keep the HTTP benchmark minimal.
+            create_project_options+=(--no-scripts --ignore-platform-req=ext-swoole)
         fi
         composer create-project "${create_project_options[@]}" \
             "$package" "$build_dir" --no-ansi 2>&1 | tee "$project_version_log"
@@ -354,6 +394,9 @@ setup_project() {
     if [[ "$target" == 'fast-route' ]]; then
         strip_fast_route_development_requirements
     fi
+    if [[ "$target" == 'hyperf' ]]; then
+        strip_hyperf_installer
+    fi
 
     if [[ "$target" == 'symfony' ]]; then
         composer --working-dir="$asset_dir" require --no-interaction \
@@ -369,8 +412,14 @@ setup_project() {
     printf 'production\n' > "$suite_dir/.benchmark-profile"
 
     if [[ -f "$asset_dir/composer.json" ]]; then
-        composer --working-dir="$asset_dir" install --prefer-dist --no-interaction \
-            --no-dev --classmap-authoritative --no-progress --ansi
+        install_options=(
+            --prefer-dist --no-interaction --no-dev
+            --classmap-authoritative --no-progress --ansi
+        )
+        if [[ "$target" == 'hyperf' ]]; then
+            install_options+=(--no-scripts --ignore-platform-req=ext-swoole)
+        fi
+        composer --working-dir="$asset_dir" install "${install_options[@]}"
     fi
 
     prepare_runtime_directories
@@ -396,6 +445,7 @@ clear_cache() {
         webrick-sharded|webrick-fused) rebuild_webrick_route_cache ;;
         yii-basic) clear_directory "$asset_dir/runtime/cache" ;;
         flight) clear_directory "$asset_dir/app/cache" ;;
+        hyperf) clear_directory "$asset_dir/runtime/container" ;;
         fatfree|leaf|pure-php) : ;;
     esac
 }
