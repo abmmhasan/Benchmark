@@ -12,6 +12,7 @@ frameworks_list="
 cakephp
 codeigniter
 fatfree
+fast-route
 flight
 infbyte
 infbyte-full
@@ -33,6 +34,7 @@ framework_categories="
 cakephp:full-stack
 codeigniter:full-stack
 fatfree:micro
+fast-route:route-only
 flight:micro
 infbyte:full-stack
 infbyte-full:full-stack
@@ -44,8 +46,8 @@ nette:full-stack
 pure-php:baseline
 slim:micro
 symfony:full-stack
-webrick-sharded:micro
-webrick-fused:micro
+webrick-sharded:route-only
+webrick-fused:route-only
 yii-basic:full-stack
 "
 
@@ -54,6 +56,7 @@ framework_architectures="
 cakephp:mvc-hmvc
 codeigniter:mvc-hmvc
 fatfree:mvc-hmvc
+fast-route:component-based
 flight:component-based
 infbyte:component-based
 infbyte-full:component-based
@@ -70,11 +73,57 @@ webrick-fused:component-based
 yii-basic:mvc-hmvc
 "
 
+# First-party dependency injection or service-container support. A container
+# supplied only by the generated skeleton or a third-party package is "no".
+framework_built_in_di="
+cakephp:yes
+codeigniter:yes
+fatfree:no
+fast-route:no
+flight:no
+infbyte:yes
+infbyte-full:yes
+kumbia:no
+laravel:yes
+laravel-api:yes
+leaf:yes
+nette:yes
+pure-php:no
+slim:no
+symfony:yes
+webrick-sharded:yes
+webrick-fused:yes
+yii-basic:yes
+"
+
+# First-party route registration and HTTP dispatch beyond a direct PHP script.
+framework_full_featured_route_dispatchers="
+cakephp:yes
+codeigniter:yes
+fatfree:yes
+fast-route:yes
+flight:yes
+infbyte:yes
+infbyte-full:yes
+kumbia:yes
+laravel:yes
+laravel-api:yes
+leaf:yes
+nette:yes
+pure-php:no
+slim:yes
+symfony:yes
+webrick-sharded:yes
+webrick-fused:yes
+yii-basic:yes
+"
+
 # Composer package whose installed release represents each framework version.
 framework_version_packages="
 cakephp:cakephp/cakephp
 codeigniter:codeigniter4/framework
 fatfree:bcosca/fatfree-core
+fast-route:nikic/fast-route
 flight:flightphp/core
 infbyte:infocyph/infbyte
 infbyte-full:infocyph/infbyte

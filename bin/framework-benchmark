@@ -529,7 +529,7 @@ try {
 
     if (!flag($options, 'no-archive')) {
         $payload = [
-            'schemaVersion' => 2,
+            'schemaVersion' => 3,
             'loadGenerator' => 'php-curl-multi',
             'suiteDirectory' => $suite->getProjectDirectory(),
             'baseUrl' => $suite->getBaseUrl(),
@@ -537,6 +537,8 @@ try {
             'targets' => $targetNames,
             'categories' => $suite->categories($targetNames),
             'architectures' => $suite->architectures($targetNames),
+            'builtInDi' => $suite->builtInDi($targetNames),
+            'fullFeaturedRouteDispatchers' => $suite->fullFeaturedRouteDispatchers($targetNames),
             'versions' => $frameworkVersions,
             'invocation' => [
                 'connections' => $connections,
