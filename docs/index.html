@@ -18,7 +18,7 @@
 <div class="chooser"><label for="runtime">Result set</label><select id="runtime"><option value="">Choose a runtime…</option><option value="opcache/">OPcache + Apache</option><option value="swoole/">Swoole persistent workers</option></select></div>
 <div class="profiles">
 <a class="profile" href="opcache/"><span class="badge">Request per process</span><h2>OPcache + Apache</h2><p>Traditional PHP web applications served by Apache with production OPcache settings.</p><span class="open">View OPcache reports <span aria-hidden="true">→</span></span></a>
-<a class="profile" href="swoole/"><span class="badge">Persistent worker</span><h2>Swoole</h2><p>Swoole-native applications kept in memory across requests, beginning with Hyperf.</p><span class="open">View Swoole reports <span aria-hidden="true">→</span></span></a>
+<a class="profile" href="swoole/"><span class="badge">Persistent worker</span><h2>Swoole</h2><p>Eight native persistent-worker targets using Hyperf, Webrick emitters, Laravel Octane, and Symfony Runtime.</p><span class="open">View Swoole reports <span aria-hidden="true">→</span></span></a>
 </div>
 </main>
 <script>document.getElementById('runtime').addEventListener('change',event=>{if(event.target.value)location.assign(event.target.value)})</script>

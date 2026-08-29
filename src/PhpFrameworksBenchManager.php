@@ -397,7 +397,7 @@ final class PhpFrameworksBenchManager
             name: $name,
             dockerfileName: 'swoole.dockerfile',
             image: 'benchmark/php-frameworks-swoole',
-            containerPort: 9501,
+            containerPort: 9500,
             volumeTarget: '/app/frameworks',
             basePath: '',
             runAsHostUser: true,
@@ -475,6 +475,8 @@ final class PhpFrameworksBenchManager
             $publishedPort,
             '--volume',
             $this->suite->getProjectDirectory() . ":{$volumeTarget}:rw",
+            '--volume',
+            $this->suite->getProjectDirectory() . ':' . $this->suite->getProjectDirectory() . ':rw',
             $image . ':latest',
         );
         $commands = [

@@ -82,10 +82,13 @@ The two Webrick targets use the same cached route and production kernel. The
 sharded target loads Webrick's directory-based cache; the fused target loads
 its single-file cache, so their results isolate the matcher strategy.
 
-Hyperf is the first Swoole-native target. It is kept out of the Apache ranking;
-likewise, request-per-process targets are not relabeled as Swoole applications.
-Both profiles run the same validation, concurrency curve, repetition, stability,
-latency, error, and remote-telemetry procedure.
+Hyperf is Swoole-only. `infbyte`, `infbyte-full`, `webrick-sharded`,
+`webrick-fused`, `laravel`, `laravel-api`, and `symfony` run in both result sets.
+InfByte and Webrick use their native Swoole emitter, Laravel uses Octane, and
+Symfony uses its Swoole Runtime adapter. Other request-per-process targets are
+not relabeled as Swoole applications without a compatible adapter. Both profiles
+run the same validation, concurrency curve, repetition, stability, latency,
+error, and remote-telemetry procedure.
 
 ### Run all targets
 

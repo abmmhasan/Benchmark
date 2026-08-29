@@ -344,6 +344,22 @@ optimize_production() {
     esac
 }
 
+install_persistent_runtime_adapter() {
+    case "$target" in
+        laravel|laravel-api)
+            composer --working-dir="$asset_dir" require laravel/octane \
+                --prefer-dist --no-interaction --update-no-dev --classmap-authoritative \
+                --no-progress --with-all-dependencies --ignore-platform-req=ext-swoole
+            ;;
+        symfony)
+            composer --working-dir="$asset_dir" require runtime/swoole \
+                --prefer-dist --no-interaction --update-no-dev --classmap-authoritative \
+                --no-progress --with-all-dependencies --ignore-platform-req=ext-swoole
+            ;;
+        *) : ;;
+    esac
+}
+
 setup_project() {
     local -a create_project_options=(
         --prefer-dist --no-cache --no-interaction
@@ -406,6 +422,7 @@ setup_project() {
 
     apply_overlay
     configure_production_environment
+    install_persistent_runtime_adapter
     if [[ "$target" == 'infbyte-full' ]]; then
         install_all_infbyte_modules
     fi
@@ -418,6 +435,8 @@ setup_project() {
         )
         if [[ "$target" == 'hyperf' ]]; then
             install_options+=(--no-scripts --ignore-platform-req=ext-swoole)
+        elif [[ "$target" == 'laravel' || "$target" == 'laravel-api' || "$target" == 'symfony' ]]; then
+            install_options+=(--ignore-platform-req=ext-swoole)
         fi
         composer --working-dir="$asset_dir" install "${install_options[@]}"
     fi
