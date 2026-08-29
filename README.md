@@ -61,16 +61,21 @@ The Docker server exports the shared benchmark-profile marker, uses
 environment variables remain target-specific so one framework cannot override
 another. Reports record the active profile under target-server details.
 
-The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `flight`,
+The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `fast-route`, `flight`,
 `infbyte`, `infbyte-full`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
 `pure-php`, `slim`, `symfony`, `webrick-sharded`, `webrick-fused`, and
 `yii-basic`. The API target remains separate
 because it measures Laravel's API routing/JSON response path rather than its web
 route. `infbyte` measures the minimal skeleton, while `infbyte-full` installs
 every module advertised by the selected stable InfByte release. Dashboard
-classifications are defined in `frameworks/config`: Full Stack
-or Micro by framework type, and MVC/HMVC or Component-Based by architecture.
-Pure PHP remains a separate comparison baseline.
+classifications are defined in `frameworks/config`: Full Stack, Micro, or Route
+Only by framework type, and MVC/HMVC or Component-Based by architecture.
+The same configuration records whether each framework ships built-in DI and a
+full-featured route dispatcher. Pure PHP remains a separate comparison baseline
+under every dashboard filter.
+
+`fast-route` measures nikic/FastRoute's cached dispatcher directly, without an
+application framework or third-party dependency-injection container.
 
 The two Webrick targets use the same cached route and production kernel. The
 sharded target loads Webrick's directory-based cache; the fused target loads

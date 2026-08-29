@@ -631,6 +631,8 @@ namespace {
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
         . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
         . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n"
+        . "framework_built_in_di=\"\nalpha:yes\nbeta:no\n\"\n"
+        . "framework_full_featured_route_dispatchers=\"\nalpha:yes\nbeta:yes\n\"\n"
         . "framework_version_packages=\"\nalpha:vendor/alpha\nbeta:vendor/beta\n\"\n",
     );
     file_put_contents(
@@ -668,6 +670,16 @@ namespace {
             $frameworkSuite->architectures() === ['alpha' => 'component-based', 'beta' => 'mvc-hmvc']
             && $frameworkSuite->architectures(['alpha']) === ['alpha' => 'component-based'],
             'framework architectures are imported and retain target selection',
+        );
+        $assert(
+            $frameworkSuite->builtInDi() === ['alpha' => 'yes', 'beta' => 'no']
+            && $frameworkSuite->builtInDi(['beta']) === ['beta' => 'no'],
+            'built-in DI capabilities are imported and retain target selection',
+        );
+        $assert(
+            $frameworkSuite->fullFeaturedRouteDispatchers() === ['alpha' => 'yes', 'beta' => 'yes']
+            && $frameworkSuite->fullFeaturedRouteDispatchers(['alpha']) === ['alpha' => 'yes'],
+            'route-dispatcher capabilities are imported and retain target selection',
         );
         $assert(
             $frameworkSuite->versions(serverPhpVersion: '8.5.0') === [
@@ -817,7 +829,7 @@ namespace {
         'http://127.0.0.1:8080/frameworks',
     );
     $bundledTargets = [
-        'cakephp', 'codeigniter', 'fatfree', 'flight', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
+        'cakephp', 'codeigniter', 'fatfree', 'fast-route', 'flight', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'nette', 'pure-php', 'slim', 'symfony',
         'webrick-sharded', 'webrick-fused', 'yii-basic',
     ];
@@ -827,6 +839,7 @@ namespace {
             'cakephp' => 'full-stack',
             'codeigniter' => 'full-stack',
             'fatfree' => 'micro',
+            'fast-route' => 'route-only',
             'flight' => 'micro',
             'infbyte' => 'full-stack',
             'infbyte-full' => 'full-stack',
@@ -838,17 +851,18 @@ namespace {
             'pure-php' => 'baseline',
             'slim' => 'micro',
             'symfony' => 'full-stack',
-            'webrick-sharded' => 'micro',
-            'webrick-fused' => 'micro',
+            'webrick-sharded' => 'route-only',
+            'webrick-fused' => 'route-only',
             'yii-basic' => 'full-stack',
         ],
-        'bundled framework categories cover full-stack, micro, and baseline targets',
+        'bundled framework categories cover full-stack, micro, route-only, and baseline targets',
     );
     $assert(
         $bundledSuite->architectures() === [
             'cakephp' => 'mvc-hmvc',
             'codeigniter' => 'mvc-hmvc',
             'fatfree' => 'mvc-hmvc',
+            'fast-route' => 'component-based',
             'flight' => 'component-based',
             'infbyte' => 'component-based',
             'infbyte-full' => 'component-based',
@@ -865,6 +879,52 @@ namespace {
             'yii-basic' => 'mvc-hmvc',
         ],
         'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
+    );
+    $assert(
+        $bundledSuite->builtInDi() === [
+            'cakephp' => 'yes',
+            'codeigniter' => 'yes',
+            'fatfree' => 'no',
+            'fast-route' => 'no',
+            'flight' => 'no',
+            'infbyte' => 'yes',
+            'infbyte-full' => 'yes',
+            'kumbia' => 'no',
+            'laravel' => 'yes',
+            'laravel-api' => 'yes',
+            'leaf' => 'yes',
+            'nette' => 'yes',
+            'pure-php' => 'no',
+            'slim' => 'no',
+            'symfony' => 'yes',
+            'webrick-sharded' => 'yes',
+            'webrick-fused' => 'yes',
+            'yii-basic' => 'yes',
+        ],
+        'bundled framework DI capabilities are explicit',
+    );
+    $assert(
+        $bundledSuite->fullFeaturedRouteDispatchers() === [
+            'cakephp' => 'yes',
+            'codeigniter' => 'yes',
+            'fatfree' => 'yes',
+            'fast-route' => 'yes',
+            'flight' => 'yes',
+            'infbyte' => 'yes',
+            'infbyte-full' => 'yes',
+            'kumbia' => 'yes',
+            'laravel' => 'yes',
+            'laravel-api' => 'yes',
+            'leaf' => 'yes',
+            'nette' => 'yes',
+            'pure-php' => 'no',
+            'slim' => 'yes',
+            'symfony' => 'yes',
+            'webrick-sharded' => 'yes',
+            'webrick-fused' => 'yes',
+            'yii-basic' => 'yes',
+        ],
+        'bundled framework route-dispatcher capabilities are explicit',
     );
     $assert(
         $bundledSuite->versions(['pure-php'], '8.5.0') === ['pure-php' => 'PHP 8.5.0'],
@@ -979,6 +1039,24 @@ namespace {
         && !str_contains($flightFrontController, 'app/config/bootstrap.php'),
         'Flight benchmark uses a minimal framework boot without skeleton session overhead',
     );
+    $fastRouteFrontController = file_get_contents(
+        $bundledSuiteDirectory . '/fast-route/_benchmark/overlay/public/index.php',
+    );
+    $fastRouteCacheBuilder = file_get_contents(
+        $bundledSuiteDirectory . '/fast-route/_benchmark/overlay/build-cache.php',
+    );
+    $assert(
+        is_string($fastRouteFrontController)
+        && is_string($fastRouteCacheBuilder)
+        && str_contains($fastRouteFrontController, 'cachedDispatcher(')
+        && str_contains($fastRouteFrontController, "Dispatcher::METHOD_NOT_ALLOWED")
+        && str_contains($fastRouteFrontController, "'cacheDisabled' => false")
+        && str_contains($fastRouteCacheBuilder, "is_file(\$cacheFile)")
+        && str_contains($lifecycleSource, 'rebuild_fast_route_cache')
+        && str_contains($lifecycleSource, 'strip_fast_route_development_requirements')
+        && str_contains($lifecycleSource, 'create_project_options+=(--no-install)'),
+        'FastRoute benchmark omits obsolete development requirements and dispatches through its prebuilt production cache',
+    );
     $webrickFrontController = file_get_contents(
         $bundledSuiteDirectory . '/_support/webrick/public/index.php',
     );
@@ -1030,6 +1108,8 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'builtInDi' => ['test' => 'yes'],
+        'fullFeaturedRouteDispatchers' => ['test' => 'yes'],
         'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# First');
@@ -1039,6 +1119,8 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'builtInDi' => ['test' => 'yes'],
+        'fullFeaturedRouteDispatchers' => ['test' => 'yes'],
         'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# Second');
@@ -1070,16 +1152,31 @@ namespace {
         && str_contains($dashboard, 'prefers-color-scheme: dark')
         && str_contains($dashboard, 'Theme · Auto')
         && str_contains($dashboard, 'id="category-filter"')
-        && str_contains($dashboard, 'Report menu')
+        && str_contains($dashboard, 'aria-label="Open report menu"')
+        && str_contains($dashboard, '<svg viewBox="0 0 24 24"')
+        && !str_contains($dashboard, '>Report menu</button>')
         && str_contains($dashboard, 'Sustainable leaders')
         && str_contains($dashboard, 'id="architecture-filter"')
-        && str_contains($dashboard, "new Option('All','all')")
+        && str_contains($dashboard, 'id="di-filter"')
+        && str_contains($dashboard, 'id="route-dispatcher-filter"')
+        && str_contains($dashboard, "placeholder:'Type'")
+        && str_contains($dashboard, "placeholder:'Architecture'")
+        && str_contains($dashboard, "placeholder:'Built-in DI'")
+        && str_contains($dashboard, "placeholder:'Route dispatcher'")
+        && !str_contains($dashboard, "new Option('All','all')")
         && str_contains($dashboard, 'Pure PHP baseline')
         && str_contains($dashboard, 'data-category="full-stack"')
+        && str_contains($dashboard, 'data-category="route-only"')
+        && str_contains($dashboard, "allowed:['full-stack','micro','route-only']")
+        && str_contains($dashboard, 'data-legend-category')
         && str_contains($dashboard, "entry.category==='baseline'")
         && str_contains($dashboard, 'decorateTargetCells')
         && str_contains($dashboard, 'categoryMap')
         && str_contains($dashboard, 'architectureMap')
+        && str_contains($dashboard, 'builtInDiMap')
+        && str_contains($dashboard, 'routeDispatcherMap')
+        && str_contains($dashboard, "entry.category==='baseline'||filterDefinitions.every")
+        && str_contains($dashboard, 'Full-featured route dispatcher')
         && str_contains($dashboard, 'versionMap')
         && str_contains($dashboard, 'badge-version')
         && str_contains($dashboard, 'v3.2.1')
@@ -1099,7 +1196,7 @@ namespace {
         && str_contains($dashboard, "['Full Stack',entry=>entry.category==='full-stack']")
         && str_contains($dashboard, "['MVC/HMVC',entry=>entry.architecture==='mvc-hmvc']")
         && str_contains($dashboard, 'server_execution_ms'),
-        'browser dashboard includes grouped actions, baseline-aware type and architecture filters, five framework-only leaders, classification badges, system-aware themes, concurrency detail, and sortable data',
+        'browser dashboard includes an icon action menu, self-labeling baseline-aware classification and capability filters, five framework-only leaders, system-aware themes, concurrency detail, and sortable data',
     );
     $expectException(
         RuntimeException::class,
@@ -1111,6 +1208,8 @@ namespace {
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
         'architectures' => ['test' => 'component-based'],
+        'builtInDi' => ['test' => 'yes'],
+        'fullFeaturedRouteDispatchers' => ['test' => 'yes'],
         'versions' => ['test' => 'v3.2.1'],
         'results' => ['test' => $historyResult],
     ], '# July replacement');

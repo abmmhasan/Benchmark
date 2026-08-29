@@ -26,6 +26,7 @@ case "$target" in
     cakephp) package="cakephp/app" ;;
     codeigniter) package="codeigniter4/appstarter" ;;
     fatfree) package="bcosca/fatfree-core" ;;
+    fast-route) package="nikic/fast-route" ;;
     flight) package="flightphp/skeleton" ;;
     infbyte|infbyte-full) package="infocyph/infbyte" ;;
     kumbia) package="kumbia/framework" ;;
@@ -115,7 +116,7 @@ configure_production_environment() {
             set_env_value "$asset_dir/.env" APP_ENV prod
             set_env_value "$asset_dir/.env" APP_DEBUG 0
             ;;
-        fatfree|kumbia|leaf|nette|pure-php|slim|webrick-sharded|webrick-fused|yii-basic)
+        fast-route|fatfree|kumbia|leaf|nette|pure-php|slim|webrick-sharded|webrick-fused|yii-basic)
             # These fixtures define production behavior directly in their overlays.
             ;;
     esac
@@ -211,6 +212,24 @@ rebuild_webrick_route_cache() {
     chmod -R a+rX "$asset_dir/.route-cache"
 }
 
+rebuild_fast_route_cache() {
+    php "$asset_dir/build-cache.php"
+    chmod a+r "$asset_dir/.route-cache.php"
+}
+
+strip_fast_route_development_requirements() {
+    php -r '
+        $file = $argv[1];
+        $manifest = json_decode(file_get_contents($file), true, 512, JSON_THROW_ON_ERROR);
+        unset($manifest["require-dev"], $manifest["autoload-dev"]);
+        file_put_contents(
+            $file,
+            json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . PHP_EOL,
+        );
+    ' "$asset_dir/composer.json"
+    rm -f -- "$asset_dir/composer.lock"
+}
+
 prepare_runtime_directories() {
     case "$target" in
         cakephp)
@@ -223,6 +242,9 @@ prepare_runtime_directories() {
             ;;
         flight)
             chmod -R a+rwX "$asset_dir/app/cache" "$asset_dir/app/log"
+            ;;
+        fast-route)
+            rm -f -- "$asset_dir/public/.htaccess"
             ;;
         infbyte|infbyte-full)
             rm -f -- "$asset_dir/public/.htaccess"
@@ -265,6 +287,9 @@ optimize_production() {
         codeigniter)
             php "$asset_dir/spark" optimize
             ;;
+        fast-route)
+            rebuild_fast_route_cache
+            ;;
         infbyte|infbyte-full)
             php "$asset_dir/infbyte" optimize
             chmod -R a+rX "$asset_dir/bootstrap/cache"
@@ -285,14 +310,21 @@ optimize_production() {
 }
 
 setup_project() {
+    local -a create_project_options=(
+        --prefer-dist --no-cache --no-interaction
+        --no-dev --remove-vcs --stability=stable
+    )
+
     clean_generated
     mkdir -p -- "$asset_dir"
 
     if [[ -n "$package" ]]; then
         build_dir="$target_dir/.benchmark-create-project"
         project_version_log="$target_dir/.benchmark-create-project.log"
-        composer create-project --prefer-dist --no-cache --no-interaction \
-            --no-dev --remove-vcs --stability=stable \
+        if [[ "$target" == 'fast-route' ]]; then
+            create_project_options+=(--no-install)
+        fi
+        composer create-project "${create_project_options[@]}" \
             "$package" "$build_dir" --no-ansi 2>&1 | tee "$project_version_log"
 
         project_version=""
@@ -317,6 +349,10 @@ setup_project() {
         rm -f -- "$project_version_log"
         build_dir=""
         project_version_log=""
+    fi
+
+    if [[ "$target" == 'fast-route' ]]; then
+        strip_fast_route_development_requirements
     fi
 
     if [[ "$target" == 'symfony' ]]; then
@@ -346,6 +382,7 @@ clear_cache() {
     case "$target" in
         cakephp) php "$asset_dir/bin/cake.php" cache clear_all ;;
         codeigniter) clear_directory "$asset_dir/writable/cache" ;;
+        fast-route) rebuild_fast_route_cache ;;
         infbyte|infbyte-full)
             php "$asset_dir/infbyte" optimize:clear
             php "$asset_dir/infbyte" optimize

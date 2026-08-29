@@ -116,6 +116,28 @@ final class PhpFrameworksBenchSuite
     }
 
     /**
+     * Return whether each target's framework ships first-party DI support.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function builtInDi(array $targets = []): array
+    {
+        return $this->binaryClassifications('framework_built_in_di', $targets);
+    }
+
+    /**
+     * Return whether each target ships a full-featured route dispatcher.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function fullFeaturedRouteDispatchers(array $targets = []): array
+    {
+        return $this->binaryClassifications('framework_full_featured_route_dispatchers', $targets);
+    }
+
+    /**
      * Return installed framework releases keyed by target name.
      *
      * @param list<string> $targets Empty means every available target.
@@ -167,6 +189,19 @@ final class PhpFrameworksBenchSuite
         }
 
         return array_intersect_key($classifications, array_flip($selected));
+    }
+
+    /** @param list<string> $targets @return array<string, string> */
+    private function binaryClassifications(string $configKey, array $targets): array
+    {
+        $classifications = $this->classifications($configKey, $targets);
+        foreach ($classifications as $target => $value) {
+            if (!in_array($value, ['yes', 'no'], true)) {
+                throw new RuntimeException("Missing yes/no {$configKey} definition for target: {$target}");
+            }
+        }
+
+        return $classifications;
     }
 
     /** @param list<string> $targets @return list<string> */
