@@ -367,31 +367,123 @@ final class PhpFrameworksBenchManager
         bool $dryRun = false,
         ?callable $output = null,
     ): array {
+        return $this->dockerContainer(
+            runtime: 'opcache',
+            port: $port,
+            name: $name,
+            dockerfileName: 'apache.dockerfile',
+            image: 'benchmark/php-frameworks-apache',
+            containerPort: 80,
+            volumeTarget: '/var/www/html/frameworks',
+            basePath: '/frameworks',
+            runAsHostUser: false,
+            dryRun: $dryRun,
+            output: $output,
+        );
+    }
+
+    /**
+     * @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}>
+     */
+    public function dockerSwoole(
+        ?int $port = null,
+        string $name = 'benchmark-frameworks-swoole',
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return $this->dockerContainer(
+            runtime: 'swoole',
+            port: $port,
+            name: $name,
+            dockerfileName: 'swoole.dockerfile',
+            image: 'benchmark/php-frameworks-swoole',
+            containerPort: 9501,
+            volumeTarget: '/app/frameworks',
+            basePath: '',
+            runAsHostUser: true,
+            dryRun: $dryRun,
+            output: $output,
+        );
+    }
+
+    /**
+     * @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}>
+     */
+    public function dockerRuntime(
+        string $runtime,
+        ?int $port = null,
+        ?string $name = null,
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return match ($runtime) {
+            'opcache' => $this->dockerApache(
+                $port,
+                $name ?? 'benchmark-frameworks-apache',
+                $dryRun,
+                $output,
+            ),
+            'swoole' => $this->dockerSwoole(
+                $port,
+                $name ?? 'benchmark-frameworks-swoole',
+                $dryRun,
+                $output,
+            ),
+            default => throw new InvalidArgumentException("Unknown benchmark runtime: {$runtime}"),
+        };
+    }
+
+    /**
+     * @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}>
+     */
+    private function dockerContainer(
+        string $runtime,
+        ?int $port,
+        string $name,
+        string $dockerfileName,
+        string $image,
+        int $containerPort,
+        string $volumeTarget,
+        string $basePath,
+        bool $runAsHostUser,
+        bool $dryRun,
+        ?callable $output,
+    ): array {
         if ($port !== null && ($port < 1 || $port > 65_535)) {
             throw new InvalidArgumentException('Docker port must be between 1 and 65535');
         }
         if (preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/', $name) !== 1) {
             throw new InvalidArgumentException('Invalid Docker container name');
         }
-        $dockerfile = $this->suite->getProjectDirectory() . '/.docker/apache.dockerfile';
+        $dockerfile = $this->suite->getProjectDirectory() . '/.docker/' . $dockerfileName;
         if (!is_file($dockerfile)) {
             throw new RuntimeException("Dockerfile not found: {$dockerfile}");
         }
         $publishedPort = $port === null
-            ? '127.0.0.1::80'
-            : "127.0.0.1:{$port}:80";
+            ? "127.0.0.1::{$containerPort}"
+            : "127.0.0.1:{$port}:{$containerPort}";
+        $runCommand = [
+            'docker', 'run', '--detach', '--rm', '--name', $name,
+        ];
+        if ($runAsHostUser && function_exists('posix_geteuid') && function_exists('posix_getegid')) {
+            $runCommand[] = '--user';
+            $runCommand[] = posix_geteuid() . ':' . posix_getegid();
+        }
+        array_push(
+            $runCommand,
+            '--publish',
+            $publishedPort,
+            '--volume',
+            $this->suite->getProjectDirectory() . ":{$volumeTarget}:rw",
+            $image . ':latest',
+        );
         $commands = [
             [
-                'docker', 'build', '--tag', 'benchmark/php-frameworks-apache',
+                'docker', 'build', '--tag', $image,
                 '--file', $dockerfile, $this->suite->getProjectDirectory(),
             ],
-            [
-                'docker', 'run', '--detach', '--rm', '--name', $name,
-                '--publish', $publishedPort,
-                '--volume', $this->suite->getProjectDirectory() . ':/var/www/html/frameworks:rw',
-                'benchmark/php-frameworks-apache:latest',
-            ],
-            ['docker', 'port', $name, '80/tcp'],
+            $runCommand,
+            ['docker', 'port', $name, "{$containerPort}/tcp"],
         ];
 
         $results = [];
@@ -423,16 +515,19 @@ final class PhpFrameworksBenchManager
                 throw new RuntimeException('Docker started, but its allocated loopback port could not be determined');
             }
             $port = (int) $match['port'];
-            $runtime = json_encode([
-                'baseUrl' => "http://127.0.0.1:{$port}/frameworks",
+            $baseUrl = "http://127.0.0.1:{$port}{$basePath}";
+            $runtimeJson = json_encode([
+                'baseUrl' => $baseUrl,
                 'host' => '127.0.0.1',
                 'port' => $port,
                 'container' => $name,
+                'runtime' => $runtime,
                 'startedAt' => gmdate(DATE_ATOM),
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-            if (file_put_contents($this->runtimeFile(), $runtime . PHP_EOL, LOCK_EX) === false) {
+            if (file_put_contents($this->runtimeFile(), $runtimeJson . PHP_EOL, LOCK_EX) === false) {
                 throw new RuntimeException('Docker started, but its runtime URL could not be recorded');
             }
+            $this->waitForHttp($baseUrl . '/libs/php_config.php');
         }
 
         return $results;
@@ -474,6 +569,33 @@ final class PhpFrameworksBenchManager
             'cwd' => $this->suite->getProjectDirectory(),
             'status' => 'completed',
         ] + $result;
+    }
+
+    /** @return array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string} */
+    public function stopDockerRuntime(
+        ?string $name = null,
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return $this->stopDockerApache($name, $dryRun, $output);
+    }
+
+    private function waitForHttp(string $url): void
+    {
+        $lastError = null;
+        for ($attempt = 0; $attempt < 100; $attempt++) {
+            try {
+                $this->httpText($url);
+                return;
+            } catch (RuntimeException $exception) {
+                $lastError = $exception;
+                usleep(200_000);
+            }
+        }
+
+        throw new RuntimeException(
+            'Docker benchmark server did not become ready: ' . ($lastError?->getMessage() ?? $url),
+        );
     }
 
     private function runtimeFile(): string

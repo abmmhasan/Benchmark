@@ -42,23 +42,46 @@ jobs:
       - name: Install benchmark dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Generate latest framework applications
-        run: composer benchmark:frameworks -- setup --force
+      - name: Generate latest OPcache framework applications
+        run: composer benchmark:frameworks -- setup --runtime=opcache --force
 
-      - name: Start benchmark server
-        run: composer benchmark:frameworks -- docker
+      - name: Generate latest Swoole framework applications
+        run: composer benchmark:frameworks -- setup --runtime=swoole --force
 
-      - name: Validate framework targets
-        run: composer benchmark:frameworks -- check
+      - name: Start OPcache benchmark server
+        run: composer benchmark:frameworks -- docker --runtime=opcache
 
-      - name: Run framework benchmarks
-        run: composer benchmark:frameworks -- run --output=docs --stability=10 --history-limit=61 --replace-monthly
+      - name: Validate OPcache framework targets
+        run: composer benchmark:frameworks -- check --runtime=opcache
 
-      - name: Show benchmark server errors
+      - name: Run complete OPcache benchmark suite
+        run: composer benchmark:frameworks -- run --runtime=opcache --output=docs/opcache --stability=10 --history-limit=61 --replace-monthly
+
+      - name: Show OPcache benchmark server errors
         if: failure()
         run: docker logs --tail 200 benchmark-frameworks-apache || true
 
-      - name: Stop benchmark server
+      - name: Stop OPcache benchmark server
+        if: always()
+        run: |
+          if [[ -f frameworks/.benchmark-server.json ]]; then
+            composer benchmark:frameworks -- docker-stop
+          fi
+
+      - name: Start Swoole benchmark server
+        run: composer benchmark:frameworks -- docker --runtime=swoole
+
+      - name: Validate Swoole framework targets
+        run: composer benchmark:frameworks -- check --runtime=swoole
+
+      - name: Run complete Swoole benchmark suite
+        run: composer benchmark:frameworks -- run --runtime=swoole --output=docs/swoole --stability=10 --history-limit=61 --replace-monthly
+
+      - name: Show Swoole benchmark server errors
+        if: failure()
+        run: docker logs --tail 200 benchmark-frameworks-swoole || true
+
+      - name: Stop Swoole benchmark server
         if: always()
         run: |
           if [[ -f frameworks/.benchmark-server.json ]]; then

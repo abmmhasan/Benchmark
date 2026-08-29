@@ -14,6 +14,7 @@ codeigniter
 fatfree
 fast-route
 flight
+hyperf
 infbyte
 infbyte-full
 kumbia
@@ -29,6 +30,30 @@ webrick-fused
 yii-basic
 "
 
+# Execution model. The profiles are benchmarked and published separately:
+# request-per-process Apache with OPcache, or a persistent Swoole worker.
+framework_runtimes="
+cakephp:opcache
+codeigniter:opcache
+fatfree:opcache
+fast-route:opcache
+flight:opcache
+hyperf:swoole
+infbyte:opcache
+infbyte-full:opcache
+kumbia:opcache
+laravel:opcache
+laravel-api:opcache
+leaf:opcache
+nette:opcache
+pure-php:opcache
+slim:opcache
+symfony:opcache
+webrick-sharded:opcache
+webrick-fused:opcache
+yii-basic:opcache
+"
+
 # Dashboard categories. Pure PHP is a reference baseline, not a framework.
 framework_categories="
 cakephp:full-stack
@@ -36,6 +61,7 @@ codeigniter:full-stack
 fatfree:micro
 fast-route:route-only
 flight:micro
+hyperf:full-stack
 infbyte:full-stack
 infbyte-full:full-stack
 kumbia:full-stack
@@ -58,6 +84,7 @@ codeigniter:mvc-hmvc
 fatfree:mvc-hmvc
 fast-route:component-based
 flight:component-based
+hyperf:component-based
 infbyte:component-based
 infbyte-full:component-based
 kumbia:mvc-hmvc
@@ -81,6 +108,7 @@ codeigniter:yes
 fatfree:no
 fast-route:no
 flight:no
+hyperf:yes
 infbyte:yes
 infbyte-full:yes
 kumbia:no
@@ -103,6 +131,7 @@ codeigniter:yes
 fatfree:yes
 fast-route:yes
 flight:yes
+hyperf:yes
 infbyte:yes
 infbyte-full:yes
 kumbia:yes
@@ -125,6 +154,7 @@ codeigniter:codeigniter4/framework
 fatfree:bcosca/fatfree-core
 fast-route:nikic/fast-route
 flight:flightphp/core
+hyperf:hyperf/framework
 infbyte:infocyph/infbyte
 infbyte-full:infocyph/infbyte
 kumbia:kumbia/framework

@@ -629,6 +629,7 @@ namespace {
         $suiteDirectory . '/config',
         "base=\"http://127.0.0.1/bench\"\nduration=17\nconnections=42\n"
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
+        . "framework_runtimes=\"\nalpha:opcache\nbeta:swoole\n\"\n"
         . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
         . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n"
         . "framework_built_in_di=\"\nalpha:yes\nbeta:no\n\"\n"
@@ -655,10 +656,17 @@ namespace {
     );
     file_put_contents($suiteDirectory . '/beta/asset/.benchmark-project-version', "vendor/beta\n2.4.0\n");
     file_put_contents($suiteDirectory . '/.docker/apache.dockerfile', "FROM php:8.4-apache\n");
+    file_put_contents($suiteDirectory . '/.docker/swoole.dockerfile', "FROM php:8.4-cli\n");
 
     try {
         $frameworkSuite = new PhpFrameworksBenchSuite($suiteDirectory);
         $assert($frameworkSuite->targets() === ['alpha', 'beta'], 'framework targets follow suite config order');
+        $assert(
+            $frameworkSuite->runtimes() === ['alpha' => 'opcache', 'beta' => 'swoole']
+            && $frameworkSuite->targetsForRuntime('opcache') === ['alpha']
+            && $frameworkSuite->targetsForRuntime('swoole') === ['beta'],
+            'framework targets are partitioned into explicit runtime profiles',
+        );
         $assert($frameworkSuite->getSuggestedConcurrency() === 42, 'suite connection default is imported');
         $assert($frameworkSuite->getSuggestedDuration() === 17, 'suite duration default is imported');
         $assert(
@@ -795,6 +803,14 @@ namespace {
             in_array('127.0.0.1:18080:80', $fixedDockerPlan[1]['command'], true),
             'Docker Apache supports an explicitly requested loopback port',
         );
+        $swooleDockerPlan = $frameworkManager->dockerSwoole(dryRun: true);
+        $assert(
+            in_array('127.0.0.1::9501', $swooleDockerPlan[1]['command'], true)
+            && in_array($suiteDirectory . ':/app/frameworks:rw', $swooleDockerPlan[1]['command'], true)
+            && in_array('--user', $swooleDockerPlan[1]['command'], true)
+            && $swooleDockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-swoole', '9501/tcp'],
+            'Docker Swoole uses an ephemeral loopback port and persistent-worker mount',
+        );
         $dockerStopPlan = $frameworkManager->stopDockerApache(dryRun: true);
         $assert(
             $dockerStopPlan['command'] === ['docker', 'stop', 'benchmark-frameworks-apache']
@@ -810,6 +826,7 @@ namespace {
         unlink($suiteDirectory . '/beta/asset/.benchmark-project-version');
         unlink($suiteDirectory . '/beta/asset/vendor/composer/installed.php');
         unlink($suiteDirectory . '/.docker/apache.dockerfile');
+        unlink($suiteDirectory . '/.docker/swoole.dockerfile');
         unlink($suiteDirectory . '/config');
         rmdir($suiteDirectory . '/alpha/_benchmark');
         rmdir($suiteDirectory . '/alpha/asset');
@@ -829,11 +846,17 @@ namespace {
         'http://127.0.0.1:8080/frameworks',
     );
     $bundledTargets = [
-        'cakephp', 'codeigniter', 'fatfree', 'fast-route', 'flight', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
+        'cakephp', 'codeigniter', 'fatfree', 'fast-route', 'flight', 'hyperf', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'nette', 'pure-php', 'slim', 'symfony',
         'webrick-sharded', 'webrick-fused', 'yii-basic',
     ];
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
+    $assert(
+        $bundledSuite->targetsForRuntime('swoole') === ['hyperf']
+        && !in_array('hyperf', $bundledSuite->targetsForRuntime('opcache'), true)
+        && count($bundledSuite->targetsForRuntime('opcache')) === 18,
+        'bundled targets keep OPcache and Swoole result sets separate',
+    );
     $assert(
         $bundledSuite->categories() === [
             'cakephp' => 'full-stack',
@@ -841,6 +864,7 @@ namespace {
             'fatfree' => 'micro',
             'fast-route' => 'route-only',
             'flight' => 'micro',
+            'hyperf' => 'full-stack',
             'infbyte' => 'full-stack',
             'infbyte-full' => 'full-stack',
             'kumbia' => 'full-stack',
@@ -864,6 +888,7 @@ namespace {
             'fatfree' => 'mvc-hmvc',
             'fast-route' => 'component-based',
             'flight' => 'component-based',
+            'hyperf' => 'component-based',
             'infbyte' => 'component-based',
             'infbyte-full' => 'component-based',
             'kumbia' => 'mvc-hmvc',
@@ -887,6 +912,7 @@ namespace {
             'fatfree' => 'no',
             'fast-route' => 'no',
             'flight' => 'no',
+            'hyperf' => 'yes',
             'infbyte' => 'yes',
             'infbyte-full' => 'yes',
             'kumbia' => 'no',
@@ -910,6 +936,7 @@ namespace {
             'fatfree' => 'yes',
             'fast-route' => 'yes',
             'flight' => 'yes',
+            'hyperf' => 'yes',
             'infbyte' => 'yes',
             'infbyte-full' => 'yes',
             'kumbia' => 'yes',
@@ -951,7 +978,9 @@ namespace {
         $helloWorld = file_get_contents("{$bundledSuiteDirectory}/{$target}/_benchmark/hello_world.sh");
         $allTargetsUseAssetDirectory = $allTargetsUseAssetDirectory
             && is_string($helloWorld)
-            && str_contains($helloWorld, '$base/$fw/asset/');
+            && ($target === 'hyperf'
+                ? str_contains($helloWorld, '$base/$fw/hello/index')
+                : str_contains($helloWorld, '$base/$fw/asset/'));
     }
     $assert($allLifecycleScriptsExist, 'every bundled target provides the complete lifecycle script set');
     $assert($allGeneratedFilesAreIgnored, 'every bundled target ignores generated create-project files');
@@ -972,8 +1001,13 @@ namespace {
         && str_contains($lifecycleSource, '--no-dev --remove-vcs')
         && str_contains($lifecycleSource, '--stability=stable')
         && str_contains($lifecycleSource, '.benchmark-project-version')
-        && str_contains($lifecycleSource, 'composer --working-dir="$asset_dir" install --prefer-dist --no-interaction')
-        && str_contains($lifecycleSource, '--no-dev --classmap-authoritative --no-progress')
+        && str_contains($lifecycleSource, 'install_options=(')
+        && str_contains($lifecycleSource, '--prefer-dist --no-interaction --no-dev')
+        && str_contains($lifecycleSource, '--classmap-authoritative --no-progress --ansi')
+        && str_contains($lifecycleSource, 'composer --working-dir="$asset_dir" install "${install_options[@]}"')
+        && str_contains($lifecycleSource, '--ignore-platform-req=ext-swoole')
+        && str_contains($lifecycleSource, 'strip_hyperf_installer')
+        && str_contains($lifecycleSource, '$manifest["minimum-stability"] = "stable"')
         && str_contains($lifecycleSource, 'cp -a "$build_dir/." "$asset_dir/"')
         && !str_contains($lifecycleSource, 'rm -f -- "$build_dir/.gitignore"')
         && preg_match('/create-project[^\n]*:[0-9]/', $lifecycleSource) !== 1,
@@ -999,19 +1033,31 @@ namespace {
     $assert(
         is_string($dockerSource)
         && str_contains($dockerSource, 'php.ini-production')
-        && str_contains($dockerSource, 'SetEnv BENCHMARK_ENVIRONMENT production')
+        && str_contains($dockerSource, 'SetEnv BENCHMARK_ENVIRONMENT opcache-production')
         && !str_contains($dockerSource, 'SetEnv APP_ENV')
         && !str_contains($dockerSource, 'SetEnv APP_DEBUG')
         && !str_contains($dockerSource, 'SetEnv CI_ENVIRONMENT')
         && str_contains($dockerSource, 'opcache.enable=1'),
         'Docker records the shared profile without overriding framework-specific environments',
     );
+    $swooleDockerSource = file_get_contents($bundledSuiteDirectory . '/.docker/swoole.dockerfile');
+    $assert(
+        is_string($swooleDockerSource)
+        && str_contains($swooleDockerSource, 'pecl install swoole')
+        && str_contains($swooleDockerSource, 'opcache.enable_cli=0')
+        && str_contains($swooleDockerSource, 'BENCHMARK_ENVIRONMENT=swoole-production')
+        && str_contains($swooleDockerSource, 'php", "bin/hyperf.php", "start'),
+        'Swoole Docker runs Hyperf as a production persistent worker without CLI OPcache',
+    );
     $workflowSource = file_get_contents(dirname(__DIR__) . '/.github/workflows/framework-benchmarks.yml');
     $assert(
         is_string($workflowSource)
         && str_contains($workflowSource, 'if: failure()')
-        && str_contains($workflowSource, 'docker logs --tail 200 benchmark-frameworks-apache || true'),
-        'the automated workflow exposes server errors before stopping a failed benchmark container',
+        && str_contains($workflowSource, 'docker logs --tail 200 benchmark-frameworks-apache || true')
+        && str_contains($workflowSource, 'docker logs --tail 200 benchmark-frameworks-swoole || true')
+        && str_contains($workflowSource, '--runtime=opcache --output=docs/opcache')
+        && str_contains($workflowSource, '--runtime=swoole --output=docs/swoole'),
+        'the automated workflow runs full separate runtime suites and exposes container errors',
     );
     $assert(
         !is_dir($bundledSuiteDirectory . '/lumen')
@@ -1193,10 +1239,21 @@ namespace {
         && str_contains($dashboard, 'OPcache enabled for web requests')
         && str_contains($dashboard, 'CLI OPcache enabled')
         && str_contains($dashboard, 'serverOpcacheRevalidateFrequencySeconds')
+        && str_contains($dashboard, 'Swoole · persistent worker')
+        && str_contains($dashboard, 'serverRuntimeExtensionVersion')
         && str_contains($dashboard, "['Full Stack',entry=>entry.category==='full-stack']")
         && str_contains($dashboard, "['MVC/HMVC',entry=>entry.architecture==='mvc-hmvc']")
         && str_contains($dashboard, 'server_execution_ms'),
         'browser dashboard includes an icon action menu, self-labeling baseline-aware classification and capability filters, five framework-only leaders, system-aware themes, concurrency detail, and sortable data',
+    );
+    $docsIndex = file_get_contents(dirname(__DIR__) . '/docs/index.html');
+    $assert(
+        is_string($docsIndex)
+        && str_contains($docsIndex, 'id="runtime"')
+        && str_contains($docsIndex, 'href="opcache/"')
+        && str_contains($docsIndex, 'href="swoole/"')
+        && str_contains($docsIndex, 'same validation, concurrency, repetition, stability, latency, and telemetry procedure'),
+        'the Pages entry point provides a global chooser for separate but methodologically identical runtime reports',
     );
     $expectException(
         RuntimeException::class,

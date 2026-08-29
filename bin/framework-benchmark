@@ -29,8 +29,8 @@ Commands:
   restart             Restart services selected with --service
   reset-opcache       Reset the web server's OPCache through the fixture endpoint
   disable-fastcgi     Add fastcgi_finish_request to disable_functions; requires --force
-  docker              Build and start the suite's Apache container
-  docker-stop         Stop and remove the suite's Apache container
+  docker              Build and start the selected runtime container
+  docker-stop         Stop and remove the active runtime container
   list                List archived benchmark runs, newest first
   compare             Compare --current with --baseline
   dashboard           Regenerate and print the dashboard path for --run
@@ -42,6 +42,7 @@ Common options:
   --suite=PATH          Framework suite directory (default: ./frameworks)
   --base-url=URL        Override the base URL read from suite config
   --target=NAMES        Comma-separated framework names; defaults to all
+  --runtime=PROFILE     Runtime profile: opcache (default) or swoole
   --output=PATH         History root (default: .benchmark-output)
   --history-limit=N     Keep only the newest N archived runs
   --replace-monthly     Replace an earlier run from the same UTC calendar month
@@ -71,8 +72,8 @@ History options:
   --baseline=ID         Baseline run for comparison (default: 1)
 
 Docker options:
-  --port=N              Fixed Apache port; omitted chooses a free port automatically
-  --name=NAME           Container name (default: benchmark-frameworks-apache)
+  --port=N              Fixed host port; omitted chooses a free port automatically
+  --name=NAME           Override the runtime-specific container name
 TEXT;
 
 /** @return never */
@@ -343,7 +344,24 @@ try {
 
     $suite = suite($options);
     $manager = new PhpFrameworksBenchManager($suite);
+    $runtime = strtolower((string) stringOption($options, 'runtime', 'opcache'));
+    if (!in_array($runtime, ['opcache', 'swoole'], true)) {
+        fail('--runtime must be opcache or swoole');
+    }
+    $runtimeTargets = $suite->targetsForRuntime($runtime);
     $targets = listOption($options['target'] ?? null);
+    if ($targets === []) {
+        $targets = $runtimeTargets;
+    } else {
+        $wrongRuntime = array_values(array_diff($targets, $runtimeTargets));
+        if ($wrongRuntime !== []) {
+            fail(sprintf(
+                'Target(s) %s do not belong to the %s runtime profile',
+                implode(', ', $wrongRuntime),
+                $runtime,
+            ));
+        }
+    }
     $dryRun = flag($options, 'dry-run');
     $force = flag($options, 'force');
     $stream = static function (string $chunk): void {
@@ -407,9 +425,10 @@ try {
         $requestedPort = stringOption($options, 'port') === null
             ? null
             : integerOption($options, 'port', 1, 1, 65_535);
-        printOperations($manager->dockerApache(
+        printOperations($manager->dockerRuntime(
+            $runtime,
             $requestedPort,
-            (string) stringOption($options, 'name', 'benchmark-frameworks-apache'),
+            stringOption($options, 'name'),
             $dryRun,
             $stream,
         ));
@@ -417,7 +436,7 @@ try {
     }
 
     if ($command === 'docker-stop') {
-        printOperations([$manager->stopDockerApache(
+        printOperations([$manager->stopDockerRuntime(
             stringOption($options, 'name'),
             $dryRun,
             $stream,
@@ -529,12 +548,14 @@ try {
 
     if (!flag($options, 'no-archive')) {
         $payload = [
-            'schemaVersion' => 3,
+            'schemaVersion' => 4,
             'loadGenerator' => 'php-curl-multi',
+            'runtimeProfile' => $runtime,
             'suiteDirectory' => $suite->getProjectDirectory(),
             'baseUrl' => $suite->getBaseUrl(),
             'targetServer' => $targetServer,
             'targets' => $targetNames,
+            'runtimes' => $suite->runtimes($targetNames),
             'categories' => $suite->categories($targetNames),
             'architectures' => $suite->architectures($targetNames),
             'builtInDi' => $suite->builtInDi($targetNames),

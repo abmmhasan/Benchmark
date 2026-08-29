@@ -56,13 +56,14 @@ Every generated application that uses Composer is installed with `--no-dev` and
 an authoritative classmap. The lifecycle applies a predefined production
 environment for each framework before running its supported cache/optimization
 commands.
-The Docker server exports the shared benchmark-profile marker, uses
-`php.ini-production`, disables displayed errors, and enables OPcache. Framework
-environment variables remain target-specific so one framework cannot override
-another. Reports record the active profile under target-server details.
+Both Docker runtimes use `php.ini-production` and disable displayed errors. The
+`opcache` profile runs request-per-process applications on Apache with OPcache
+enabled. The `swoole` profile runs persistent workers with CLI OPcache disabled.
+Framework environment variables remain target-specific, and every report records
+the active runtime and engine details.
 
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `fast-route`, `flight`,
-`infbyte`, `infbyte-full`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
+`hyperf`, `infbyte`, `infbyte-full`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
 `pure-php`, `slim`, `symfony`, `webrick-sharded`, `webrick-fused`, and
 `yii-basic`. The API target remains separate
 because it measures Laravel's API routing/JSON response path rather than its web
@@ -81,45 +82,59 @@ The two Webrick targets use the same cached route and production kernel. The
 sharded target loads Webrick's directory-based cache; the fused target loads
 its single-file cache, so their results isolate the matcher strategy.
 
+Hyperf is the first Swoole-native target. It is kept out of the Apache ranking;
+likewise, request-per-process targets are not relabeled as Swoole applications.
+Both profiles run the same validation, concurrency curve, repetition, stability,
+latency, error, and remote-telemetry procedure.
+
 ### Run all targets
 
-Omitting `--target` selects every framework listed in `frameworks/config`.
+Omitting `--target` selects every framework assigned to `--runtime`. The default
+runtime is `opcache`; use `--runtime=swoole` for the persistent-worker result set.
 
 #### Generate
 
 ```bash
-# Create every framework application from its latest compatible release.
-composer benchmark:frameworks -- setup --force
+# Create the latest compatible stable applications for both result sets.
+composer benchmark:frameworks -- setup --runtime=opcache --force
+composer benchmark:frameworks -- setup --runtime=swoole --force
 
 # Later, recreate every application from the latest compatible release.
-composer benchmark:frameworks -- update --force
+composer benchmark:frameworks -- update --runtime=opcache --force
+composer benchmark:frameworks -- update --runtime=swoole --force
 
-# Start the bundled Apache server on an automatically selected free port.
-composer benchmark:frameworks -- docker
+# Run the complete OPcache + Apache result set.
+composer benchmark:frameworks -- docker --runtime=opcache
+composer benchmark:frameworks -- check --runtime=opcache
+composer benchmark:frameworks -- run --runtime=opcache --output=.benchmark-output/opcache
+composer benchmark:frameworks -- docker-stop
 
-# Validate every endpoint before measurement.
-composer benchmark:frameworks -- check
-
-# Benchmark every configured framework.
-composer benchmark:frameworks -- run
+# Run the same complete test procedure under Swoole.
+composer benchmark:frameworks -- docker --runtime=swoole
+composer benchmark:frameworks -- check --runtime=swoole
+composer benchmark:frameworks -- run --runtime=swoole --output=.benchmark-output/swoole
+composer benchmark:frameworks -- docker-stop
 ```
 
 #### View results
 
 ```bash
 # List archived runs and regenerate the newest visual dashboard.
-composer benchmark:frameworks -- list
-composer benchmark:frameworks -- dashboard --run=0
+composer benchmark:frameworks -- list --output=.benchmark-output/opcache
+composer benchmark:frameworks -- dashboard --run=0 --output=.benchmark-output/opcache
+composer benchmark:frameworks -- list --output=.benchmark-output/swoole
+composer benchmark:frameworks -- dashboard --run=0 --output=.benchmark-output/swoole
 ```
 
 #### Clean
 
 ```bash
-# Stop and remove the bundled benchmark server.
+# Stop and remove whichever benchmark runtime is active.
 composer benchmark:frameworks -- docker-stop
 
-# Remove every generated application while preserving benchmark scripts.
-composer benchmark:frameworks -- clean --force
+# Remove generated applications while preserving benchmark scripts.
+composer benchmark:frameworks -- clean --runtime=opcache --force
+composer benchmark:frameworks -- clean --runtime=swoole --force
 ```
 
 ### Manual targets
@@ -150,14 +165,14 @@ expected HTTP status, valid body, and valid telemetry. Remote peak-memory bytes
 are imported into the report. Server execution time and included-file counts are
 reported separately from end-to-end libcurl latency.
 
-The suite base URL, duration, connection count, and unversioned target list are
-defined in `frameworks/config`. Use `--suite` only to exercise a compatible
+The suite base URL, duration, connection count, unversioned target list, and
+runtime assignment are defined in `frameworks/config`. Use `--suite` only to exercise a compatible
 external suite. `connections` maps to this runner's maximum
 concurrency for the built-in PHP load generator.
 
 Framework folders are not auto-discovered. A target must be listed in
 `frameworks/config` and provide `_benchmark/hello_world.sh`; the config controls
-which targets run and in what order.
+which targets run, their runtime, and their order.
 
 Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
 as canonical `results.json`, `report.md`, and an interactive Bootstrap 5.3.8
@@ -165,14 +180,16 @@ as canonical `results.json`, `report.md`, and an interactive Bootstrap 5.3.8
 Browser reports display dates using the visitor's locale and time zone; CLI
 history listings use a human-readable UTC format. Pass `--no-archive` to disable
 files. Each artifact records the target web server's PHP version, SAPI, loaded
-configuration, and actual OPcache/JIT settings separately from the CLI load
-generator environment. Installed framework releases are resolved from Composer
+configuration, runtime-engine metadata, and actual OPcache/JIT settings separately
+from the CLI load generator environment. Installed framework releases are resolved from Composer
 metadata and displayed beside framework names in the dashboard.
 
 The `Framework benchmarks` GitHub Actions workflow runs on day 1 of every month,
 after non-docs changes land on `main`, or manually. It uses a 10% RPM stability
 threshold and opens or updates a pull request containing the generated `docs/`
-reports instead of committing directly to `main`. After the results PR is
+reports into separate `docs/opcache/` and `docs/swoole/` histories instead of
+committing directly to `main`. The root `docs/index.html` provides a global
+runtime chooser. After the results PR is
 reviewed and merged, the separate `Benchmark Pages` workflow deploys `docs/` to
 GitHub Pages. Set the repository's Pages source to **GitHub Actions** and enable
 **Allow GitHub Actions to create and approve pull requests** in the repository
@@ -223,10 +240,10 @@ composer benchmark:frameworks -- docker-stop
 
 `disable-fastcgi` reads the web server's loaded `php.ini`, creates a
 `.benchmark.bak` backup, and requires appropriate local filesystem permissions.
-Restart PHP-FPM afterward. Docker mode builds the bundled suite's Apache image,
-mounts `frameworks/` at `/var/www/html/frameworks`, and starts a named container
-in the background. By default Docker publishes Apache on an available ephemeral
-loopback port and records the resulting base URL in the ignored
+Restart PHP-FPM afterward. Docker mode builds either the Apache/OPcache or Swoole
+image, mounts `frameworks/`, and starts a named container in the background. By
+default Docker publishes the selected server on an available ephemeral loopback
+port and records the resulting base URL in the ignored
 `frameworks/.benchmark-server.json` file. Later `doctor`, `check`, and `run`
 commands load that URL automatically. Pass `--port=N` only when a fixed port is
 required. The static URL in `frameworks/config` is only a fallback for a manually

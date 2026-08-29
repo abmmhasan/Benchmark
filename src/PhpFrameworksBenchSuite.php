@@ -94,6 +94,37 @@ final class PhpFrameworksBenchSuite
     }
 
     /**
+     * Return execution-runtime slugs keyed by target name.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function runtimes(array $targets = []): array
+    {
+        $runtimes = $this->classifications('framework_runtimes', $targets);
+        foreach ($runtimes as $target => $runtime) {
+            if (!in_array($runtime, ['opcache', 'swoole'], true)) {
+                throw new RuntimeException("Missing opcache/swoole framework_runtimes definition for target: {$target}");
+            }
+        }
+
+        return $runtimes;
+    }
+
+    /** @return list<string> */
+    public function targetsForRuntime(string $runtime): array
+    {
+        if (!in_array($runtime, ['opcache', 'swoole'], true)) {
+            throw new InvalidArgumentException("Unknown benchmark runtime: {$runtime}");
+        }
+
+        return array_keys(array_filter(
+            $this->runtimes(),
+            static fn(string $targetRuntime): bool => $targetRuntime === $runtime,
+        ));
+    }
+
+    /**
      * Return dashboard category slugs keyed by target name.
      *
      * @param list<string> $targets Empty means every available target.
