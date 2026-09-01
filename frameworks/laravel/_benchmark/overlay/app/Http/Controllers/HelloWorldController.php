@@ -6,7 +6,7 @@
 namespace App\Http\Controllers;
 
 class HelloWorldController extends Controller {
-    public function index() {
+    public function index(?string $value = null) {
         return response('Hello World!');
     }
 }

@@ -28,7 +28,7 @@ $results = BenchmarkRunner::make()
     ->count(5_000)
     ->minimumDuration(10)
     ->timeout(10)
-    ->repetitions(3)
+    ->repetitions(2)
     ->stabilityThreshold(5)
     ->concurrencyLevels(2, 25, 50, 100)
     ->warmUpRequests(10)
@@ -64,8 +64,8 @@ the active runtime and engine details.
 
 The bundled targets are `cakephp`, `codeigniter`, `fatfree`, `fast-route`, `flight`,
 `hyperf`, `infbyte`, `infbyte-full`, `kumbia`, `laravel`, `laravel-api`, `leaf`, `nette`,
-`pure-php`, `slim`, `symfony`, `webrick-sharded`, `webrick-fused`, and
-`yii-basic`. The API target remains separate
+`pure-php`, `slim`, `symfony`, `webrick-sharded`, `webrick-fused`,
+`webrick-generated`, and `yii-basic`. The API target remains separate
 because it measures Laravel's API routing/JSON response path rather than its web
 route. `infbyte` measures the minimal skeleton, while `infbyte-full` installs
 every module advertised by the selected stable InfByte release. Dashboard
@@ -78,12 +78,14 @@ under every dashboard filter.
 `fast-route` measures nikic/FastRoute's cached dispatcher directly, without an
 application framework or third-party dependency-injection container.
 
-The two Webrick targets use the same cached route and production kernel. The
-sharded target loads Webrick's directory-based cache; the fused target loads
-its single-file cache, so their results isolate the matcher strategy.
+The three Webrick targets use the same cached route and production kernel. The
+sharded target loads Webrick's directory-based cache, the fused target loads
+its compact single-file cache, and the generated target loads its generated
+matcher code. Their results therefore isolate the matcher strategy.
 
 Hyperf is Swoole-only. `infbyte`, `infbyte-full`, `webrick-sharded`,
-`webrick-fused`, `laravel`, `laravel-api`, and `symfony` run in both result sets.
+`webrick-fused`, `webrick-generated`, `laravel`, `laravel-api`, and `symfony` run
+in both result sets.
 InfByte and Webrick use their native Swoole emitter, Laravel uses Octane, and
 Symfony uses its Swoole Runtime adapter. Other request-per-process targets are
 not relabeled as Swoole applications without a compatible adapter. Both profiles
@@ -282,11 +284,18 @@ per-response application-level validation.
 
 The default concurrency curve is derived from the configured maximum when
 `concurrencyLevels()` is omitted. Repetitions are configurable from one to three
-and default to three. Target and concurrency order rotate between repetitions to
+and default to two. Target and concurrency order rotate between repetitions to
 reduce time and phase-order bias. Targets are always benchmarked sequentially:
 the runner completely awaits one target before sending benchmark traffic to the
 next target. Concurrent phases continue for at least the configured minimum
 duration, subject to the hard request safety limit.
+
+Each framework phase uses one evenly distributed mixed route workload: a static
+route, a dynamic parameter in the middle, a dynamic parameter at the end, a 404,
+and a POST that must return 405. The successful routes must return the expected
+Hello World response, while the error routes must return their exact expected
+status and a non-empty body. These requests contribute to one combined result per
+framework; they are not displayed as five separate benchmark candidates.
 
 With two or three repetitions, a concurrency level is stable only when its RPM
 spread is within `stabilityThreshold()` (5% by default). Unstable levels remain in
@@ -296,19 +305,18 @@ stability independently. A target with no stable level therefore keeps its peak
 visible without receiving a sustainable rank. One-repetition results are
 explicitly marked unverified and are not treated as stable.
 
-Automatic warm-up is limited to GET and HEAD. Preflight always uses a bodyless
-HEAD probe, so configured POST, PUT, PATCH, and DELETE operations are not executed
-outside the measured workload. Set `skipPreflight: true` when a target cannot
-accept HEAD.
+Route scenarios default to automatic warm-up only for GET and HEAD. A known
+non-mutating scenario can explicitly opt in; the suite does this for its POST
+request that must return 405. Preflight always uses a bodyless HEAD probe. Set
+`skipPreflight: true` when a target cannot accept HEAD.
 
 When `container` is configured, the runner restarts it, waits for Docker's running
 state, then uses the safe HTTP preflight as the application-readiness gate. Docker
 CPU and memory measurements stream concurrently with benchmark traffic.
 
 Before measuring any candidate, the runner performs a fail-fast validation pass
-over every configured target. It verifies connectivity for all targets and, for
-GET/HEAD targets, requires one unmeasured request to match both the expected HTTP
-status and response validator. Mutating methods are not executed during this pass.
+over every configured route scenario. It verifies connectivity and requires one
+unmeasured request to match both the expected HTTP status and response validator.
 
 ## Terminal progress and reports
 

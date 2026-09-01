@@ -126,39 +126,49 @@ final class PhpFrameworksBenchManager
     {
         $results = [];
         foreach ($this->suite->configs($targets) as $config) {
-            $handle = curl_init();
-            try {
-                if (!curl_setopt_array($handle, [
-                    CURLOPT_URL => $config->getUrl(),
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_FOLLOWLOCATION => false,
-                    CURLOPT_CONNECTTIMEOUT => 5,
-                    CURLOPT_TIMEOUT => 10,
-                    CURLOPT_SSL_VERIFYHOST => 2,
-                    CURLOPT_SSL_VERIFYPEER => true,
-                    CURLOPT_HTTPHEADER => ['Accept: text/plain, application/json', 'Cache-Control: no-cache'],
-                ])) {
-                    throw new RuntimeException("Unable to configure check for {$config->getName()}");
+            foreach ($config->getRouteScenarios() as $scenario) {
+                $handle = curl_init();
+                try {
+                    if (!curl_setopt_array($handle, [
+                        CURLOPT_URL => $scenario->getUrl(),
+                        CURLOPT_CUSTOMREQUEST => $scenario->getMethod()->value,
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_FOLLOWLOCATION => false,
+                        CURLOPT_CONNECTTIMEOUT => 5,
+                        CURLOPT_TIMEOUT => 10,
+                        CURLOPT_SSL_VERIFYHOST => 2,
+                        CURLOPT_SSL_VERIFYPEER => true,
+                        CURLOPT_HTTPHEADER => ['Accept: text/plain, application/json', 'Cache-Control: no-cache'],
+                    ])) {
+                        throw new RuntimeException(sprintf(
+                            'Unable to configure check for %s · %s',
+                            $config->getName(),
+                            $scenario->getLabel(),
+                        ));
+                    }
+                    $response = curl_exec($handle);
+                    $info = curl_getinfo($handle);
+                    $status = (int) ($info['http_code'] ?? 0);
+                    $valid = is_string($response)
+                        && $status === $scenario->getExpectedStatus()
+                        && ($scenario->getResponseValidator())($response, $info);
+                    $results[$config->getName() . ' · ' . $scenario->getLabel()] = [
+                        'url' => $scenario->getUrl(),
+                        'method' => $scenario->getMethod()->value,
+                        'expectedStatus' => $scenario->getExpectedStatus(),
+                        'status' => $status,
+                        'valid' => $valid,
+                        'curlError' => curl_errno($handle) === CURLE_OK ? null : curl_error($handle),
+                        'memoryBytes' => is_string($response)
+                            ? ($config->getResponseMemoryExtractor())?->__invoke($response, $info)
+                            : null,
+                        'metrics' => is_string($response)
+                            ? (($config->getResponseMetricsExtractor())?->__invoke($response, $info) ?? [])
+                            : [],
+                    ];
+                } finally {
+                    curl_close($handle);
                 }
-                $response = curl_exec($handle);
-                $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
-                $valid = is_string($response)
-                    && $status === $config->getExpectedStatus()
-                    && ($config->getResponseValidator())($response, curl_getinfo($handle));
-                $results[$config->getName()] = [
-                    'url' => $config->getUrl(),
-                    'status' => $status,
-                    'valid' => $valid,
-                    'curlError' => curl_errno($handle) === CURLE_OK ? null : curl_error($handle),
-                    'memoryBytes' => is_string($response)
-                        ? ($config->getResponseMemoryExtractor())?->__invoke($response, curl_getinfo($handle))
-                        : null,
-                    'metrics' => is_string($response)
-                        ? (($config->getResponseMetricsExtractor())?->__invoke($response, curl_getinfo($handle)) ?? [])
-                        : [],
-                ];
-            } finally {
-                curl_close($handle);
             }
         }
 
@@ -459,6 +469,9 @@ final class PhpFrameworksBenchManager
         if (!is_file($dockerfile)) {
             throw new RuntimeException("Dockerfile not found: {$dockerfile}");
         }
+        if ($port === null && !$dryRun) {
+            $port = self::availableLoopbackPort();
+        }
         $publishedPort = $port === null
             ? "127.0.0.1::{$containerPort}"
             : "127.0.0.1:{$port}:{$containerPort}";
@@ -533,6 +546,31 @@ final class PhpFrameworksBenchManager
         }
 
         return $results;
+    }
+
+    private static function availableLoopbackPort(): int
+    {
+        $errorCode = 0;
+        $errorMessage = '';
+        $socket = stream_socket_server(
+            'tcp://127.0.0.1:0',
+            $errorCode,
+            $errorMessage,
+            STREAM_SERVER_BIND | STREAM_SERVER_LISTEN,
+        );
+        if ($socket === false) {
+            throw new RuntimeException("Unable to allocate a loopback port: {$errorMessage} ({$errorCode})");
+        }
+        try {
+            $address = stream_socket_get_name($socket, false);
+            if (!is_string($address) || preg_match('/:(?<port>\d+)$/', $address, $match) !== 1) {
+                throw new RuntimeException('Unable to determine the allocated loopback port');
+            }
+
+            return (int) $match['port'];
+        } finally {
+            fclose($socket);
+        }
     }
 
     /** @return array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string} */

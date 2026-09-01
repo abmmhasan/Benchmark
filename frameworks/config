@@ -27,6 +27,7 @@ slim
 symfony
 webrick-sharded
 webrick-fused
+webrick-generated
 yii-basic
 "
 
@@ -51,6 +52,7 @@ slim:opcache
 symfony:both
 webrick-sharded:both
 webrick-fused:both
+webrick-generated:both
 yii-basic:opcache
 "
 
@@ -74,6 +76,7 @@ slim:micro
 symfony:full-stack
 webrick-sharded:route-only
 webrick-fused:route-only
+webrick-generated:route-only
 yii-basic:full-stack
 "
 
@@ -97,6 +100,7 @@ slim:component-based
 symfony:component-based
 webrick-sharded:component-based
 webrick-fused:component-based
+webrick-generated:component-based
 yii-basic:mvc-hmvc
 "
 
@@ -121,6 +125,7 @@ slim:no
 symfony:yes
 webrick-sharded:yes
 webrick-fused:yes
+webrick-generated:yes
 yii-basic:yes
 "
 
@@ -144,6 +149,7 @@ slim:yes
 symfony:yes
 webrick-sharded:yes
 webrick-fused:yes
+webrick-generated:yes
 yii-basic:yes
 "
 
@@ -166,5 +172,6 @@ slim:slim/slim
 symfony:symfony/framework-bundle
 webrick-sharded:infocyph/webrick
 webrick-fused:infocyph/webrick
+webrick-generated:infocyph/webrick
 yii-basic:yiisoft/yii2
 "

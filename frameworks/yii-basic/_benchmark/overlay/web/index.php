@@ -7,6 +7,16 @@ require __DIR__ . '/../vendor/autoload.php';
 require __DIR__ . '/../vendor/yiisoft/yii2/Yii.php';
 
 $config = require __DIR__ . '/../config/web.php';
+$config['components']['urlManager'] = [
+    'enablePrettyUrl' => true,
+    'enableStrictParsing' => true,
+    'showScriptName' => true,
+    'rules' => [
+        'hello/index' => 'hello/index',
+        'hello/<value:[^/]+>/index' => 'hello/index',
+        'hello/index/<value:[^/]+>' => 'hello/index',
+    ],
+];
 
 (new yii\web\Application($config))->run();
 

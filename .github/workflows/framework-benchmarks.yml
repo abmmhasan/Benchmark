@@ -56,7 +56,7 @@ jobs:
         run: composer benchmark:frameworks -- check --runtime=opcache
 
       - name: Run complete OPcache benchmark suite
-        run: composer benchmark:frameworks -- run --runtime=opcache --output=docs/opcache --stability=10 --history-limit=61 --replace-monthly
+        run: composer benchmark:frameworks -- run --runtime=opcache --output=docs/opcache --repetitions=2 --stability=10 --history-limit=61 --replace-monthly
 
       - name: Show OPcache benchmark server errors
         if: failure()
@@ -76,7 +76,7 @@ jobs:
         run: composer benchmark:frameworks -- check --runtime=swoole
 
       - name: Run complete Swoole benchmark suite
-        run: composer benchmark:frameworks -- run --runtime=swoole --output=docs/swoole --stability=10 --history-limit=61 --replace-monthly
+        run: composer benchmark:frameworks -- run --runtime=swoole --output=docs/swoole --repetitions=2 --stability=10 --history-limit=61 --replace-monthly
 
       - name: Show Swoole benchmark server errors
         if: failure()

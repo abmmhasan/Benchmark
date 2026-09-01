@@ -20,7 +20,7 @@ final class BenchmarkRunner
     private ?bool $defaultHttp2 = null;
     private ?bool $defaultVerifySsl = null;
     private ?float $defaultSampleEvery = null;
-    private int $repetitions = 3;
+    private int $repetitions = 2;
     private int $warmUpRequests = 10;
     private float $minimumDurationSeconds = 10.0;
     private float $maximumRpmSpreadPercent = 5.0;
@@ -317,10 +317,12 @@ final class BenchmarkRunner
                 $this->console->updateTarget($baseProgress, 'waiting for endpoint');
                 $this->waitForEndpoint($probe, $name);
             }
-            $safeWarmUp = in_array($config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)
-                ? $this->warmUpRequests
-                : 0;
-            $this->console->updateTarget($baseProgress, "warming {$safeWarmUp} requests");
+            $safeScenarios = array_filter(
+                $config->getRouteScenarios(),
+                static fn(RouteScenario $scenario): bool => $scenario->isSafeForWarmUp(),
+            );
+            $safeWarmUp = $safeScenarios !== [] ? $this->warmUpRequests : 0;
+            $this->console->updateTarget($baseProgress, "warming {$safeWarmUp} requests per safe scenario");
             $probe->warmUp($safeWarmUp);
             $sampler?->start();
 
@@ -562,6 +564,7 @@ final class BenchmarkRunner
             responseValidator: $config->getResponseValidator(),
             responseMemoryExtractor: $config->getResponseMemoryExtractor(),
             responseMetricsExtractor: $config->getResponseMetricsExtractor(),
+            routeScenarios: $config->getRouteScenarios(),
         );
     }
 
@@ -871,7 +874,7 @@ final class BenchmarkRunner
             'concurrencyLevels' => $levels,
             'repetitions' => $this->repetitions,
             'maximumRpmSpreadPercent' => $this->maximumRpmSpreadPercent,
-            'warmUpRequests' => $warmUp,
+            'warmUpRequestsPerScenario' => $warmUp,
             'minimumDurationSeconds' => $this->minimumDurationSeconds,
             'timeoutSeconds' => $config->getTimeout(),
             'http2' => $config->isHttp2Enabled(),
@@ -886,6 +889,15 @@ final class BenchmarkRunner
             'responseValidation' => true,
             'responseMemoryExtraction' => $config->getResponseMemoryExtractor() !== null,
             'responseMetricsExtraction' => $config->getResponseMetricsExtractor() !== null,
+            'routeWorkload' => array_map(
+                static fn(RouteScenario $scenario): string => sprintf(
+                    '%s (%s %d)',
+                    $scenario->getLabel(),
+                    $scenario->getMethod()->value,
+                    $scenario->getExpectedStatus(),
+                ),
+                $config->getRouteScenarios(),
+            ),
             'loadGenerator' => 'php-curl-multi',
             'phpVersion' => PHP_VERSION,
             'phpSapi' => PHP_SAPI,

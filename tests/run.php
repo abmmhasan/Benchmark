@@ -9,6 +9,7 @@ namespace AbmmHasan\Benchmark {
         public static int $status = 200;
         public static int $result = CURLE_OK;
         public static array $lastOptions = [];
+        public static array $optionHistory = [];
         public static int $execCount = 0;
 
         public static function reset(): void
@@ -17,6 +18,7 @@ namespace AbmmHasan\Benchmark {
             self::$status = 200;
             self::$result = CURLE_OK;
             self::$lastOptions = [];
+            self::$optionHistory = [];
             self::$execCount = 0;
         }
     }
@@ -30,6 +32,7 @@ namespace AbmmHasan\Benchmark {
     {
         $handle->options = $options;
         FakeCurl::$lastOptions = $options;
+        FakeCurl::$optionHistory[] = $options;
         return true;
     }
 
@@ -99,6 +102,7 @@ namespace {
     use AbmmHasan\Benchmark\PhpFrameworksBenchSuite;
     use AbmmHasan\Benchmark\PhpFrameworksBenchManager;
     use AbmmHasan\Benchmark\RequestBenchmark;
+    use AbmmHasan\Benchmark\RouteScenario;
     use AbmmHasan\Benchmark\UnitBenchmark;
 
     require dirname(__DIR__) . '/vendor/autoload.php';
@@ -136,6 +140,7 @@ namespace {
         responseValidator: $overrides['validator'] ?? $validator,
         responseMemoryExtractor: $overrides['memoryExtractor'] ?? null,
         responseMetricsExtractor: $overrides['metricsExtractor'] ?? null,
+        routeScenarios: $overrides['routeScenarios'] ?? [],
     );
 
     $assert(enum_exists(HttpMethod::class), 'HttpMethod autoloads directly');
@@ -249,6 +254,30 @@ namespace {
     $assert($lastProgress['phase'] === 'concurrency 2', 'progress identifies the active phase');
 
     FakeCurl::reset();
+    $mixedRoutes = new RequestBenchmark($resolvedConfig([
+        'routeScenarios' => [
+            new RouteScenario('static', 'Static', 'http://example.test/static', HttpMethod::GET, 200, $validator),
+            new RouteScenario('dynamic', 'Dynamic', 'http://example.test/dynamic/42', HttpMethod::POST, 200, $validator),
+        ],
+    ]));
+    $mixedRoutes->runSingleThreaded();
+    $mixedMethods = array_count_values(array_map(
+        static fn(array $options): string => $options[CURLOPT_CUSTOMREQUEST],
+        FakeCurl::$optionHistory,
+    ));
+    $assert(
+        $mixedMethods === ['GET' => 50, 'POST' => 50],
+        'route scenarios are distributed evenly inside one combined measurement phase',
+    );
+    FakeCurl::reset();
+    $mixedRoutes->warmUp(1);
+    $assert(
+        count(FakeCurl::$optionHistory) === 1
+        && FakeCurl::$optionHistory[0][CURLOPT_CUSTOMREQUEST] === 'GET',
+        'mutating route scenarios require an explicit opt-in before warm-up replay',
+    );
+
+    FakeCurl::reset();
     $withoutMemoryExtractor = new RequestBenchmark($resolvedConfig());
     $withoutMemoryExtractor->runSingleThreaded();
     $assert($withoutMemoryExtractor->getRemoteMemoryMB() === null, 'response memory extraction is opt-in');
@@ -312,11 +341,11 @@ namespace {
     $results = $perConfigRunner->runAll();
     $result = $results['per-config'];
     $assert(
-        count($preparedRepetitions) === 6
+        count($preparedRepetitions) === 4
         && $preparedRepetitions[0] === ['per-config', 1],
         'runtime preparation hooks run before every target repetition',
     );
-    $assert(count($result['runs']) === 3, 'three repeated runs are recorded');
+    $assert(count($result['runs']) === 2, 'two repeated runs are recorded by default');
     $assert(array_keys($result['throughputCurve']) === [2, 4], 'default concurrency curve is recorded');
     $assert($result['score'] === $result['stable']['req_per_min'], 'ranking score is stable RPM');
     $assert(
@@ -387,7 +416,7 @@ namespace {
     $assert(!str_contains($markdown, 'configuration.'), 'Markdown avoids flattened configuration keys');
     $assert(!str_contains($markdown, '| RPS |'), 'derived RPS is not duplicated beside RPM');
     $assert(
-        str_contains($markdown, 'Run 1 RPM') && str_contains($markdown, 'Run 3 RPM'),
+        str_contains($markdown, 'Run 1 RPM') && str_contains($markdown, 'Run 2 RPM'),
         'per-run RPM remains visible',
     );
     preg_match('/## Sustainable ranking\R\R(?<table>.*?)(?=\R\R## )/s', $markdown, $summaryMatch);
@@ -531,10 +560,10 @@ namespace {
     $assert($unverified['rpm_stability'] === 'unverified', 'one repetition is explicitly unverified');
 
     $stabilityRuns = $result['runs'];
-    foreach ([100.0, 101.0, 102.0] as $index => $rpm) {
+    foreach ([100.0, 101.0] as $index => $rpm) {
         $stabilityRuns[$index]['concurrency'][2]['req_per_min'] = $rpm;
     }
-    foreach ([200.0, 400.0, 800.0] as $index => $rpm) {
+    foreach ([200.0, 400.0] as $index => $rpm) {
         $stabilityRuns[$index]['concurrency'][4]['req_per_min'] = $rpm;
     }
     $stabilityRunner = BenchmarkRunner::make()
@@ -560,7 +589,7 @@ namespace {
         && $stableSelection['peak']['concurrency'] === 4,
         'stable and peak concurrency measurements remain independently visible',
     );
-    foreach ([100.0, 200.0, 400.0] as $index => $rpm) {
+    foreach ([100.0, 400.0] as $index => $rpm) {
         $stabilityRuns[$index]['concurrency'][2]['req_per_min'] = $rpm;
     }
     $inconclusive = $aggregateConfig->invoke(
@@ -851,18 +880,18 @@ namespace {
     $bundledTargets = [
         'cakephp', 'codeigniter', 'fatfree', 'fast-route', 'flight', 'hyperf', 'infbyte', 'infbyte-full', 'kumbia', 'laravel',
         'laravel-api', 'leaf', 'nette', 'pure-php', 'slim', 'symfony',
-        'webrick-sharded', 'webrick-fused', 'yii-basic',
+        'webrick-sharded', 'webrick-fused', 'webrick-generated', 'yii-basic',
     ];
     $assert($bundledSuite->targets() === $bundledTargets, 'bundled framework targets are unversioned and ordered');
     $assert(
         $bundledSuite->targetsForRuntime('swoole') === [
             'hyperf', 'infbyte', 'infbyte-full', 'laravel', 'laravel-api',
-            'symfony', 'webrick-sharded', 'webrick-fused',
+            'symfony', 'webrick-sharded', 'webrick-fused', 'webrick-generated',
         ]
         && !in_array('hyperf', $bundledSuite->targetsForRuntime('opcache'), true)
         && in_array('infbyte', $bundledSuite->targetsForRuntime('opcache'), true)
         && in_array('infbyte-full', $bundledSuite->targetsForRuntime('opcache'), true)
-        && count($bundledSuite->targetsForRuntime('opcache')) === 18,
+        && count($bundledSuite->targetsForRuntime('opcache')) === 19,
         'bundled targets support native dual-runtime InfByte comparisons',
     );
     $assert(
@@ -885,6 +914,7 @@ namespace {
             'symfony' => 'full-stack',
             'webrick-sharded' => 'route-only',
             'webrick-fused' => 'route-only',
+            'webrick-generated' => 'route-only',
             'yii-basic' => 'full-stack',
         ],
         'bundled framework categories cover full-stack, micro, route-only, and baseline targets',
@@ -909,6 +939,7 @@ namespace {
             'symfony' => 'component-based',
             'webrick-sharded' => 'component-based',
             'webrick-fused' => 'component-based',
+            'webrick-generated' => 'component-based',
             'yii-basic' => 'mvc-hmvc',
         ],
         'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
@@ -933,6 +964,7 @@ namespace {
             'symfony' => 'yes',
             'webrick-sharded' => 'yes',
             'webrick-fused' => 'yes',
+            'webrick-generated' => 'yes',
             'yii-basic' => 'yes',
         ],
         'bundled framework DI capabilities are explicit',
@@ -957,6 +989,7 @@ namespace {
             'symfony' => 'yes',
             'webrick-sharded' => 'yes',
             'webrick-fused' => 'yes',
+            'webrick-generated' => 'yes',
             'yii-basic' => 'yes',
         ],
         'bundled framework route-dispatcher capabilities are explicit',
@@ -965,10 +998,21 @@ namespace {
         $bundledSuite->versions(['pure-php'], '8.5.0') === ['pure-php' => 'PHP 8.5.0'],
         'the Pure PHP baseline displays the benchmark server PHP version',
     );
+    $symfonyConfig = $bundledSuite->configs(['symfony'])[0];
     $assert(
-        $bundledSuite->configs(['symfony'])[0]->getUrl()
+        $symfonyConfig->getUrl()
             === 'http://127.0.0.1:8080/frameworks/symfony/asset/public/index.php/hello/index',
         'bundled suite URL is generated from its internal config',
+    );
+    $symfonyScenarios = $symfonyConfig->getRouteScenarios();
+    $assert(
+        array_map(static fn(RouteScenario $scenario): string => $scenario->getKey(), $symfonyScenarios)
+            === ['static', 'dynamic-middle', 'dynamic-last', 'not-found', 'method-not-allowed']
+        && array_map(static fn(RouteScenario $scenario): int => $scenario->getExpectedStatus(), $symfonyScenarios)
+            === [200, 200, 200, 404, 405]
+        && $symfonyScenarios[4]->getMethod() === HttpMethod::POST
+        && $symfonyScenarios[4]->isSafeForWarmUp(),
+        'every bundled target receives the five-route mixed workload contract',
     );
     $allLifecycleScriptsExist = true;
     $allGeneratedFilesAreIgnored = true;
@@ -1144,6 +1188,7 @@ namespace {
     $assert(
         is_string($webrickFrontController)
         && str_contains($webrickFrontController, "'fused' => FusedMatcher::make()")
+        && str_contains($webrickFrontController, "'generated' => GeneratedMatcher::make()")
         && str_contains($webrickFrontController, "'sharded' => ShardedMatcher::make()")
         && str_contains($webrickFrontController, "'/hello/index'") === false
         && str_contains($lifecycleSource, '--matcher="$matcher" --cache="$cache"')
@@ -1153,8 +1198,11 @@ namespace {
         )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'sharded';"
         && trim((string) file_get_contents(
             $bundledSuiteDirectory . '/webrick-fused/_benchmark/overlay/matcher.php',
-        )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'fused';",
-        'Webrick targets share one route and isolate the sharded and fused production matchers',
+        )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'fused';"
+        && trim((string) file_get_contents(
+            $bundledSuiteDirectory . '/webrick-generated/_benchmark/overlay/matcher.php',
+        )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'generated';",
+        'Webrick targets share one route and isolate the sharded, fused, and generated production matchers',
     );
 
     $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));

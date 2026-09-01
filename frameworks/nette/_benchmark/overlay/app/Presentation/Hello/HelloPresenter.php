@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Presentation\Hello;
 
 use Nette;
+use Nette\Application\Responses\TextResponse;
 
 /*
     PHP-Frameworks-Bench
@@ -12,9 +13,23 @@ use Nette;
  */
 final class HelloPresenter extends Nette\Application\UI\Presenter
 {
-    public function actionDefault(): void
+    public function actionDefault(?string $value = null): void
     {
-        echo 'Hello World!';
+        if (!$this->getHttpRequest()->isMethod('GET')) {
+            $this->getHttpResponse()->setCode(405);
+            $this->getHttpResponse()->setHeader('Allow', 'GET');
+            $this->sendResponse(new TextResponse('Method Not Allowed'));
+        }
+        $this->sendResponse(new TextResponse('Hello World!'));
+    }
+
+    public function actionMiddle(?string $value = null): void
+    {
+        $this->sendResponse(new TextResponse('Hello World!'));
+    }
+
+    public function actionLast(?string $value = null): void
+    {
+        $this->sendResponse(new TextResponse('Hello World!'));
     }
 }
-

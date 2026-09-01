@@ -9,6 +9,7 @@ use Infocyph\Webrick\Response\Response;
 use Infocyph\Webrick\Router\Definition\Registrar;
 use Infocyph\Webrick\Router\Kernel\RouterKernel;
 use Infocyph\Webrick\Router\Matching\FusedMatcher;
+use Infocyph\Webrick\Router\Matching\GeneratedMatcher;
 use Infocyph\Webrick\Router\Matching\ShardedMatcher;
 use Psr\Log\NullLogger;
 use Swoole\Http\Request as SwooleRequest;
@@ -36,12 +37,15 @@ require $assetDirectory . '/vendor/autoload.php';
 $matcherMode = require $assetDirectory . '/matcher.php';
 $matcher = match ($matcherMode) {
     'fused' => FusedMatcher::make(),
+    'generated' => GeneratedMatcher::make(),
     'sharded' => ShardedMatcher::make(),
     default => throw new RuntimeException('Unsupported Webrick benchmark matcher.'),
 };
-$routeCache = $matcherMode === 'fused'
-    ? $assetDirectory . '/.route-cache/__routes.php'
-    : $assetDirectory . '/.route-cache';
+$routeCache = match ($matcherMode) {
+    'fused' => $assetDirectory . '/.route-cache/__routes.php',
+    'generated' => $assetDirectory . '/.route-cache/__generated.php',
+    default => $assetDirectory . '/.route-cache',
+};
 $kernel = RouterKernel::bootWithRegistrar(
     log: new NullLogger(),
     matcher: $matcher,

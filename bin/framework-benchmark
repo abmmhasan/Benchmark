@@ -54,7 +54,7 @@ Run options:
   --concurrency=LEVELS  Comma-separated concurrency curve; defaults automatically
   --count=N             Minimum requests per phase (default: 5000)
   --duration=SECONDS    Minimum phase duration; defaults to suite duration
-  --repetitions=N       Repetitions from 1 to 3 (default: 3)
+  --repetitions=N       Repetitions from 1 to 3 (default: 2)
   --stability=PERCENT   Maximum stable RPM spread (default: 5; CI uses 10)
   --timeout=SECONDS     Per-request timeout (default: 10)
   --warm-up=N           Warm-up requests per repetition (default: 10)
@@ -375,14 +375,16 @@ try {
 
     if ($command === 'check') {
         $checks = $manager->checkTargets($targets);
-        fwrite(STDOUT, "| Target | HTTP | Valid | Memory bytes | Server ms | Included files | URL |\n");
-        fwrite(STDOUT, "| --- | ---: | --- | ---: | ---: | ---: | --- |\n");
+        fwrite(STDOUT, "| Target · scenario | Method | Expected | HTTP | Valid | Memory bytes | Server ms | Included files | URL |\n");
+        fwrite(STDOUT, "| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | --- |\n");
         $failed = false;
         foreach ($checks as $target => $check) {
             $failed = $failed || !$check['valid'];
             fwrite(STDOUT, sprintf(
-                "| %s | %d | %s | %s | %s | %s | %s |\n",
+                "| %s | %s | %d | %d | %s | %s | %s | %s | %s |\n",
                 $target,
+                $check['method'],
+                $check['expectedStatus'],
                 $check['status'],
                 $check['valid'] ? 'yes' : 'no',
                 $check['memoryBytes'] ?? '—',
@@ -471,7 +473,7 @@ try {
         0.0,
         (float) BenchmarkConfig::MAX_PHASE_DURATION_SECONDS,
     );
-    $repetitions = integerOption($options, 'repetitions', 3, 1, 3);
+    $repetitions = integerOption($options, 'repetitions', 2, 1, 3);
     $stability = floatOption($options, 'stability', 5.0, 0.0, 10_000.0);
     $timeout = integerOption($options, 'timeout', 10, 1, BenchmarkConfig::MAX_TIMEOUT_SECONDS);
     $warmUp = integerOption($options, 'warm-up', 10, 0, 10_000);

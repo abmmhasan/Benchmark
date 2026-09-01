@@ -383,8 +383,9 @@ final class PhpFrameworksBenchSuite
         $configs = [];
         foreach ($selected as $target) {
             self::assertTargetName($target);
+            $staticUrl = $this->targetUrl($target);
             $configs[] = new BenchmarkConfig(
-                url: $this->targetUrl($target),
+                url: $staticUrl,
                 method: HttpMethod::GET,
                 headers: [
                     'Accept' => 'text/plain, application/json',
@@ -395,6 +396,49 @@ final class PhpFrameworksBenchSuite
                 responseValidator: self::isExpectedResponse(...),
                 responseMemoryExtractor: self::extractMemoryBytes(...),
                 responseMetricsExtractor: self::extractResponseMetrics(...),
+                routeScenarios: [
+                    new RouteScenario(
+                        'static',
+                        'Static',
+                        $staticUrl,
+                        HttpMethod::GET,
+                        200,
+                        self::isExpectedResponse(...),
+                    ),
+                    new RouteScenario(
+                        'dynamic-middle',
+                        'Dynamic middle',
+                        self::replaceRoute($staticUrl, 'hello/42/index'),
+                        HttpMethod::GET,
+                        200,
+                        self::isExpectedResponse(...),
+                    ),
+                    new RouteScenario(
+                        'dynamic-last',
+                        'Dynamic last',
+                        self::replaceRoute($staticUrl, 'hello/index/42'),
+                        HttpMethod::GET,
+                        200,
+                        self::isExpectedResponse(...),
+                    ),
+                    new RouteScenario(
+                        'not-found',
+                        '404',
+                        self::replaceRoute($staticUrl, 'benchmark/not-found'),
+                        HttpMethod::GET,
+                        404,
+                        self::isExpectedErrorResponse(...),
+                    ),
+                    new RouteScenario(
+                        'method-not-allowed',
+                        '405',
+                        $staticUrl,
+                        HttpMethod::POST,
+                        405,
+                        self::isExpectedErrorResponse(...),
+                        safeForWarmUp: true,
+                    ),
+                ],
             );
         }
 
@@ -422,6 +466,16 @@ final class PhpFrameworksBenchSuite
         return is_array($json)
             && ($json['status'] ?? null) === true
             && ($json['message'] ?? null) === 'Hello World!';
+    }
+
+    public static function hasTelemetry(string $response): bool
+    {
+        return self::parseTelemetry($response) !== null;
+    }
+
+    public static function isExpectedErrorResponse(string $response): bool
+    {
+        return trim($response) !== '';
     }
 
     public static function extractMemoryBytes(string $response): int|float|null
@@ -470,6 +524,21 @@ final class PhpFrameworksBenchSuite
         }
 
         return $url;
+    }
+
+    private static function replaceRoute(string $url, string $route): string
+    {
+        $position = strrpos($url, 'hello/index');
+        if ($position === false) {
+            throw new RuntimeException("Unable to derive route scenario from {$url}");
+        }
+
+        $scenarioUrl = substr_replace($url, $route, $position, strlen('hello/index'));
+        if (filter_var($scenarioUrl, FILTER_VALIDATE_URL) === false) {
+            throw new RuntimeException("Invalid route scenario URL generated from {$url}");
+        }
+
+        return $scenarioUrl;
     }
 
     private function helloWorldFile(string $target): string

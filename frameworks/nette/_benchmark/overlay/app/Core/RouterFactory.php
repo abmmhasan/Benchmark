@@ -16,9 +16,10 @@ final class RouterFactory
         $router = new RouteList;
         $router
             ->withPath('index.php')
+            ->addRoute('hello/<value>/index', 'Hello:middle')
+            ->addRoute('hello/index/<value>', 'Hello:last')
             ->addRoute('hello/index', 'Hello:default');
 
         return $router;
     }
 }
-

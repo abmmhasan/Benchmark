@@ -46,6 +46,9 @@ final class BenchmarkConfig
     private ?Closure $responseMemoryExtractor;
     private ?Closure $responseMetricsExtractor;
 
+    /** @var list<RouteScenario> */
+    private array $routeScenarios;
+
     public function __construct(
         string $url,
         HttpMethod $method = HttpMethod::GET,
@@ -69,6 +72,7 @@ final class BenchmarkConfig
         ?callable $responseValidator = null,
         ?callable $responseMemoryExtractor = null,
         ?callable $responseMetricsExtractor = null,
+        array $routeScenarios = [],
     ) {
         /* ---------- basic validation ---------- */
         if (!filter_var($url, FILTER_VALIDATE_URL)) {
@@ -125,6 +129,18 @@ final class BenchmarkConfig
         $this->responseMetricsExtractor = $responseMetricsExtractor === null
             ? null
             : Closure::fromCallable($responseMetricsExtractor);
+
+        $scenarioKeys = [];
+        foreach ($routeScenarios as $scenario) {
+            if (!$scenario instanceof RouteScenario) {
+                throw new InvalidArgumentException('routeScenarios must contain only RouteScenario values');
+            }
+            if (isset($scenarioKeys[$scenario->getKey()])) {
+                throw new InvalidArgumentException("Duplicate route scenario: {$scenario->getKey()}");
+            }
+            $scenarioKeys[$scenario->getKey()] = true;
+        }
+        $this->routeScenarios = array_values($routeScenarios);
     }
 
     /* ---------- getters ---------- */
@@ -226,5 +242,22 @@ final class BenchmarkConfig
     public function getResponseMetricsExtractor(): ?Closure
     {
         return $this->responseMetricsExtractor;
+    }
+
+    /** @return list<RouteScenario> */
+    public function getRouteScenarios(): array
+    {
+        if ($this->routeScenarios !== []) {
+            return $this->routeScenarios;
+        }
+
+        return [new RouteScenario(
+            key: 'default',
+            label: 'Default',
+            url: $this->url,
+            method: $this->method,
+            expectedStatus: $this->expectedStatus,
+            responseValidator: $this->responseValidator,
+        )];
     }
 }

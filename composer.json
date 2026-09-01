@@ -35,6 +35,7 @@
       "@php -l src/PhpFrameworksBenchSuite.php",
       "@php -l src/PhpFrameworksBenchManager.php",
       "@php -l src/RequestBenchmark.php",
+      "@php -l src/RouteScenario.php",
       "@php -l src/UnitBenchmark.php",
       "@php -l benchmarks/ComponentBench.php",
       "@php -l tests/run.php",
