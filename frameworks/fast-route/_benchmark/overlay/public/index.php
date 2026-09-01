@@ -8,6 +8,10 @@ use function FastRoute\cachedDispatcher;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
+register_shutdown_function(static function (): void {
+    require dirname(__DIR__, 3) . '/libs/output_data.php';
+});
+
 $dispatcher = cachedDispatcher(
     require dirname(__DIR__) . '/routes.php',
     [
@@ -59,4 +63,3 @@ switch ($route[0]) {
 
 header('Content-Type: text/plain; charset=UTF-8');
 echo 'Hello World!', PHP_EOL;
-require dirname(__DIR__, 3) . '/libs/output_data.php';

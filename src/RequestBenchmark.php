@@ -61,13 +61,14 @@ final class RequestBenchmark
     /** Perform a non-mutating connectivity probe. */
     public function preflight(): void
     {
-        $options = $this->prepareOptions();
-        unset($options[CURLOPT_POSTFIELDS]);
-        $options[CURLOPT_CUSTOMREQUEST] = HttpMethod::HEAD->value;
-        $options[CURLOPT_NOBODY] = true;
+        foreach ($this->config->getRouteScenarios() as $scenario) {
+            $options = $this->prepareOptions($scenario);
+            unset($options[CURLOPT_POSTFIELDS]);
+            $options[CURLOPT_CUSTOMREQUEST] = HttpMethod::HEAD->value;
+            $options[CURLOPT_NOBODY] = true;
 
-        $handle = curl_init();
-        try {
+            $handle = curl_init();
+            try {
             if (!curl_setopt_array($handle, $options)) {
                 throw new RuntimeException('Unable to configure the preflight request');
             }
@@ -77,7 +78,7 @@ final class RequestBenchmark
             if ($response === false || $status === 0) {
                 throw new RuntimeException(sprintf(
                     'Connectivity failed (%s): [%d] %s',
-                    $this->config->getUrl(),
+                    $scenario->getUrl(),
                     curl_errno($handle),
                     curl_error($handle),
                 ));
@@ -85,12 +86,13 @@ final class RequestBenchmark
             if ($status >= 500) {
                 throw new RuntimeException(sprintf(
                     'Endpoint is not ready (%s): HTTP %d',
-                    $this->config->getUrl(),
+                    $scenario->getUrl(),
                     $status,
                 ));
             }
-        } finally {
-            curl_close($handle);
+            } finally {
+                curl_close($handle);
+            }
         }
     }
 
@@ -103,36 +105,42 @@ final class RequestBenchmark
         if ($requests === 0) {
             return;
         }
-        if (!in_array($this->config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)) {
-            throw new LogicException('Automatic warm-up is only safe for GET and HEAD benchmarks');
-        }
-
-        $options = $this->prepareOptions();
         $handle = curl_init();
         try {
-            for ($i = 0; $i < $requests; ++$i) {
-                if ($i > 0) {
-                    curl_reset($handle);
+            $iteration = 0;
+            foreach ($this->config->getRouteScenarios() as $scenario) {
+                if (!$scenario->isSafeForWarmUp()) {
+                    continue;
                 }
-                if (!curl_setopt_array($handle, $options)) {
-                    throw new RuntimeException('Unable to configure a warm-up request');
-                }
+                $options = $this->prepareOptions($scenario);
+                for ($i = 0; $i < $requests; ++$i) {
+                    if ($iteration++ > 0) {
+                        curl_reset($handle);
+                    }
+                    if (!curl_setopt_array($handle, $options)) {
+                        throw new RuntimeException('Unable to configure a warm-up request');
+                    }
 
-                $response = curl_exec($handle);
-                $info = curl_getinfo($handle);
-                $failure = $this->classify($response, $info, curl_errno($handle));
-                if ($failure !== null) {
-                    $detail = match ($failure) {
-                        'status' => sprintf(
-                            'expected HTTP %d, received HTTP %d',
-                            $this->config->getExpectedStatus(),
-                            (int) ($info['http_code'] ?? 0),
-                        ),
-                        'timeout' => 'request timed out',
-                        'transfer' => sprintf('[%d] %s', curl_errno($handle), curl_error($handle)),
-                        'validation' => 'response validator rejected the body',
-                    };
-                    throw new RuntimeException("Warm-up request failed validation: {$detail}");
+                    $response = curl_exec($handle);
+                    $info = curl_getinfo($handle);
+                    $failure = $this->classify($scenario, $response, $info, curl_errno($handle));
+                    if ($failure !== null) {
+                        $detail = match ($failure) {
+                            'status' => sprintf(
+                                'expected HTTP %d, received HTTP %d',
+                                $scenario->getExpectedStatus(),
+                                (int) ($info['http_code'] ?? 0),
+                            ),
+                            'timeout' => 'request timed out',
+                            'transfer' => sprintf('[%d] %s', curl_errno($handle), curl_error($handle)),
+                            'validation' => 'response validator rejected the body',
+                        };
+                        throw new RuntimeException(sprintf(
+                            'Warm-up request failed validation for %s: %s',
+                            $scenario->getLabel(),
+                            $detail,
+                        ));
+                    }
                 }
             }
         } finally {
@@ -146,10 +154,6 @@ final class RequestBenchmark
      */
     public function validateTarget(): void
     {
-        if (!in_array($this->config->getMethod(), [HttpMethod::GET, HttpMethod::HEAD], true)) {
-            return;
-        }
-
         try {
             $this->warmUp(1);
         } catch (RuntimeException $exception) {
@@ -201,7 +205,7 @@ final class RequestBenchmark
 
     public function runSingleThreaded(): array
     {
-        $options = $this->prepareOptions();
+        $scenarios = $this->config->getRouteScenarios();
         $handle = curl_init();
         $latencies = [];
         $connectTotal = 0.0;
@@ -214,6 +218,8 @@ final class RequestBenchmark
 
         try {
             for ($i = 0, $count = $this->config->getCount(); $i < $count; ++$i) {
+                $scenario = $scenarios[$i % count($scenarios)];
+                $options = $this->prepareOptions($scenario);
                 if ($i > 0) {
                     curl_reset($handle);
                 }
@@ -225,7 +231,7 @@ final class RequestBenchmark
                 $response = curl_exec($handle);
                 $elapsed = self::secondsSince($requestStartedAt);
                 $info = curl_getinfo($handle);
-                $failure = $this->classify($response, $info, curl_errno($handle));
+                $failure = $this->classify($scenario, $response, $info, curl_errno($handle));
                 self::recordResult($counters, $failure);
 
                 if ($failure === null) {
@@ -268,7 +274,7 @@ final class RequestBenchmark
             throw new LogicException('Minimum phase duration is outside the configured safety bounds');
         }
 
-        $options = $this->prepareOptions();
+        $scenarios = $this->config->getRouteScenarios();
         $multi = curl_multi_init();
         $active = [];
         $latencies = [];
@@ -292,7 +298,9 @@ final class RequestBenchmark
             }
         }
 
-        $enqueue = function () use ($multi, $options, &$active, &$launched, &$inFlight): void {
+        $enqueue = function () use ($multi, $scenarios, &$active, &$launched, &$inFlight): void {
+            $scenario = $scenarios[$launched % count($scenarios)];
+            $options = $this->prepareOptions($scenario);
             $handle = curl_init();
             if (!curl_setopt_array($handle, $options)) {
                 curl_close($handle);
@@ -303,7 +311,7 @@ final class RequestBenchmark
                 throw new RuntimeException('Unable to add a concurrent benchmark request');
             }
 
-            $active[spl_object_id($handle)] = $handle;
+            $active[spl_object_id($handle)] = ['handle' => $handle, 'scenario' => $scenario];
             ++$launched;
             ++$inFlight;
         };
@@ -326,10 +334,15 @@ final class RequestBenchmark
 
                 while (($completed = curl_multi_info_read($multi)) !== false) {
                     $handle = $completed['handle'];
+                    $activeRequest = $active[spl_object_id($handle)] ?? null;
+                    if (!is_array($activeRequest) || !($activeRequest['scenario'] ?? null) instanceof RouteScenario) {
+                        throw new RuntimeException('Unable to resolve the completed request route scenario');
+                    }
+                    $scenario = $activeRequest['scenario'];
                     $response = curl_multi_getcontent($handle);
                     $info = curl_getinfo($handle);
                     $result = (int) ($completed['result'] ?? CURLE_OK);
-                    $failure = $this->classify($response, $info, $result);
+                    $failure = $this->classify($scenario, $response, $info, $result);
                     self::recordResult($counters, $failure);
 
                     if ($failure === null) {
@@ -375,7 +388,8 @@ final class RequestBenchmark
                 }
             } while ($inFlight > 0);
         } finally {
-            foreach ($active as $handle) {
+            foreach ($active as $request) {
+                $handle = $request['handle'];
                 curl_multi_remove_handle($multi, $handle);
                 curl_close($handle);
             }
@@ -417,11 +431,12 @@ final class RequestBenchmark
         ] + $this->config->getCurlOptions();
     }
 
-    private function prepareOptions(): array
+    private function prepareOptions(?RouteScenario $scenario = null): array
     {
+        $scenario ??= $this->config->getRouteScenarios()[0];
         $options = [
-            CURLOPT_URL => $this->config->getUrl(),
-            CURLOPT_CUSTOMREQUEST => $this->config->getMethod()->value,
+            CURLOPT_URL => $scenario->getUrl(),
+            CURLOPT_CUSTOMREQUEST => $scenario->getMethod()->value,
         ];
         $body = $this->config->getBody();
         $headers = $this->config->getHeaders();
@@ -446,7 +461,7 @@ final class RequestBenchmark
         $options[CURLOPT_HTTP_VERSION] = ($this->config->isHttp2Enabled() ?? false)
             ? CURL_HTTP_VERSION_2_0
             : CURL_HTTP_VERSION_1_1;
-        if ($this->config->getMethod() === HttpMethod::HEAD) {
+        if ($scenario->getMethod() === HttpMethod::HEAD) {
             $options[CURLOPT_NOBODY] = true;
         }
 
@@ -462,7 +477,12 @@ final class RequestBenchmark
     }
 
     /** @param array<string, mixed> $info */
-    private function classify(string|false $response, array $info, int $transferResult): ?string
+    private function classify(
+        RouteScenario $scenario,
+        string|false $response,
+        array $info,
+        int $transferResult,
+    ): ?string
     {
         if ($transferResult === CURLE_OPERATION_TIMEDOUT) {
             return 'timeout';
@@ -470,12 +490,12 @@ final class RequestBenchmark
         if ($response === false || $transferResult !== CURLE_OK) {
             return 'transfer';
         }
-        if ((int) ($info['http_code'] ?? 0) !== $this->config->getExpectedStatus()) {
+        if ((int) ($info['http_code'] ?? 0) !== $scenario->getExpectedStatus()) {
             return 'status';
         }
 
         try {
-            if (!(($this->config->getResponseValidator())($response, $info))) {
+            if (!(($scenario->getResponseValidator())($response, $info))) {
                 return 'validation';
             }
         } catch (Throwable) {

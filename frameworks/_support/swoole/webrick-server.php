@@ -2,15 +2,8 @@
 
 declare(strict_types=1);
 
-use Infocyph\Webrick\Request\Core\Stream;
-use Infocyph\Webrick\Request\Request;
-use Infocyph\Webrick\Response\Emitter\SwooleEmitter;
 use Infocyph\Webrick\Response\Response;
-use Infocyph\Webrick\Router\Definition\Registrar;
-use Infocyph\Webrick\Router\Kernel\RouterKernel;
-use Infocyph\Webrick\Router\Matching\FusedMatcher;
-use Infocyph\Webrick\Router\Matching\ShardedMatcher;
-use Psr\Log\NullLogger;
+use Infocyph\Webrick\Runtime\Http\SwooleRuntimeAdapter;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
 use Swoole\Http\Server;
@@ -32,26 +25,10 @@ if (!is_string($assetDirectory)) {
 
 chdir($assetDirectory);
 require $assetDirectory . '/vendor/autoload.php';
+require $assetDirectory . '/benchmark-kernel.php';
 
-$matcherMode = require $assetDirectory . '/matcher.php';
-$matcher = match ($matcherMode) {
-    'fused' => FusedMatcher::make(),
-    'sharded' => ShardedMatcher::make(),
-    default => throw new RuntimeException('Unsupported Webrick benchmark matcher.'),
-};
-$routeCache = $matcherMode === 'fused'
-    ? $assetDirectory . '/.route-cache/__routes.php'
-    : $assetDirectory . '/.route-cache';
-$kernel = RouterKernel::bootWithRegistrar(
-    log: new NullLogger(),
-    matcher: $matcher,
-    register: static function (Registrar $registrar) use ($assetDirectory): void {
-        require $assetDirectory . '/routes.php';
-    },
-    routeCache: $routeCache,
-    fallbackAliasesFromRegistrar: false,
-    debug: false,
-);
+$kernel = benchmarkWebrickKernel($assetDirectory);
+$adapter = SwooleRuntimeAdapter::swoole();
 
 $server = new Server('0.0.0.0', $port, SWOOLE_BASE);
 $server->set([
@@ -63,37 +40,16 @@ $server->set([
 $server->on('request', static function (
     SwooleRequest $incoming,
     SwooleResponse $outgoing,
-) use ($kernel): void {
+) use ($adapter, $kernel): void {
     $startedAt = microtime(true);
 
     try {
-        $swooleServer = is_array($incoming->server ?? null) ? $incoming->server : [];
-        $headers = is_array($incoming->header ?? null) ? $incoming->header : [];
-        $query = is_array($incoming->get ?? null) ? $incoming->get : [];
-        $post = is_array($incoming->post ?? null) ? $incoming->post : [];
-        $cookies = is_array($incoming->cookie ?? null) ? $incoming->cookie : [];
-        $path = (string) ($swooleServer['request_uri'] ?? '/');
-        $queryString = (string) ($swooleServer['query_string'] ?? '');
-        $host = (string) ($headers['host'] ?? '127.0.0.1');
-        $uri = 'http://' . $host . $path . ($queryString !== '' ? '?' . $queryString : '');
-        $serverParameters = [];
-        foreach ($swooleServer as $name => $value) {
-            $serverParameters[strtoupper((string) $name)] = $value;
-        }
-        $serverParameters['REQUEST_TIME_FLOAT'] = $startedAt;
-        $request = new Request(
-            method: (string) ($swooleServer['request_method'] ?? 'GET'),
-            uri: $uri,
-            server: $serverParameters,
-            headers: $headers,
-            body: new Stream($incoming->rawContent() ?: ''),
-            httpVer: (string) ($swooleServer['server_protocol'] ?? '1.1'),
-            parsed: $post,
-            query: $query,
-            cookies: $cookies,
+        $context = $adapter->context(
+            $incoming,
+            $outgoing,
+            $kernel->requiresHostRouting(),
         );
-        $request = $request->withAttribute('swoole.response', $outgoing);
-        $response = $kernel->handle($request);
+        $response = $kernel->handleRuntime($context);
         $telemetry = sprintf(
             "\n%' 8d:%f:%'.03d",
             memory_get_peak_usage(),
@@ -105,7 +61,7 @@ $server->on('request', static function (
             $response->getStatusCode(),
             $response->getHeaders(),
         );
-        new SwooleEmitter()->emit($response, $request);
+        $adapter->write($response, $context);
     } catch (Throwable $exception) {
         error_log($exception->__toString());
         if (!$outgoing->isWritable()) {

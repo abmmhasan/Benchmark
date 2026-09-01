@@ -88,7 +88,7 @@ $raw = new BenchmarkConfig(
 $runner = BenchmarkRunner::make()
     ->threads(100)
     ->count(5000)
-    ->repetitions(3)
+    ->repetitions(2)
     ->stabilityThreshold(5)
     ->minimumDuration(10)
     ->piping(PipingMode::Optimal)

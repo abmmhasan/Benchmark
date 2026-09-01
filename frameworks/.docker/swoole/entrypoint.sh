@@ -22,6 +22,8 @@ php /app/frameworks/_support/swoole/webrick-server.php /app/frameworks/webrick-s
 benchmark_pids+=("$!")
 php /app/frameworks/_support/swoole/webrick-server.php /app/frameworks/webrick-fused/asset 9505 &
 benchmark_pids+=("$!")
+php /app/frameworks/_support/swoole/webrick-server.php /app/frameworks/webrick-generated/asset 9509 &
+benchmark_pids+=("$!")
 php /app/frameworks/laravel/asset/artisan octane:start --server=swoole --host=0.0.0.0 --port=9506 --workers="$(nproc)" --task-workers=0 --max-requests=100000 --no-interaction &
 benchmark_pids+=("$!")
 php /app/frameworks/laravel-api/asset/artisan octane:start --server=swoole --host=0.0.0.0 --port=9507 --workers="$(nproc)" --task-workers=0 --max-requests=100000 --no-interaction &

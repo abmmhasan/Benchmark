@@ -37,7 +37,7 @@ case "$target" in
     pure-php) package="" ;;
     slim) package="slim/slim-skeleton" ;;
     symfony) package="symfony/skeleton" ;;
-    webrick-sharded|webrick-fused) package="infocyph/webrick" ;;
+    webrick-sharded|webrick-fused|webrick-generated) package="infocyph/webrick" ;;
     yii-basic) package="yiisoft/yii2-app-basic" ;;
     *) printf 'Unknown framework target: %s\n' "$target" >&2; exit 2 ;;
 esac
@@ -69,7 +69,7 @@ apply_overlay() {
 
     case "$target" in
         infbyte-full) shared_overlay="$suite_dir/infbyte/_benchmark/overlay" ;;
-        webrick-sharded|webrick-fused) shared_overlay="$support_dir/webrick" ;;
+        webrick-sharded|webrick-fused|webrick-generated) shared_overlay="$support_dir/webrick" ;;
     esac
 
     if [[ -n "$shared_overlay" && -d "$shared_overlay" ]]; then
@@ -124,7 +124,7 @@ configure_production_environment() {
             set_env_value "$asset_dir/.env" APP_ENV prod
             set_env_value "$asset_dir/.env" APP_DEBUG 0
             ;;
-        fast-route|fatfree|kumbia|leaf|nette|pure-php|slim|webrick-sharded|webrick-fused|yii-basic)
+        fast-route|fatfree|kumbia|leaf|nette|pure-php|slim|webrick-sharded|webrick-fused|webrick-generated|yii-basic)
             # These fixtures define production behavior directly in their overlays.
             ;;
     esac
@@ -198,7 +198,11 @@ rebuild_webrick_route_cache() {
             ;;
         webrick-fused)
             matcher="fused"
-            cache="$asset_dir/.route-cache/__routes.php"
+            cache="$asset_dir/.route-cache/fused.php"
+            ;;
+        webrick-generated)
+            matcher="generated"
+            cache="$asset_dir/.route-cache/generated.php"
             ;;
         *)
             printf 'Cannot build a Webrick route cache for: %s\n' "$target" >&2
@@ -216,8 +220,10 @@ rebuild_webrick_route_cache() {
     fi
     php "$asset_dir/webrick" route:cache \
         --matcher="$matcher" --cache="$cache" \
-        --routes="$asset_dir/routes.php" --alias-fallback=0
+        --routes="$asset_dir/routes.php"
+    php "$asset_dir/build-release.php"
     chmod -R a+rX "$asset_dir/.route-cache"
+    chmod -R a+rX "$asset_dir/.benchmark-release"
 }
 
 rebuild_fast_route_cache() {
@@ -284,6 +290,8 @@ prepare_runtime_directories() {
             chmod -R a+rwX "$asset_dir/bootstrap/cache" "$asset_dir/storage"
             ;;
         kumbia)
+            sed -i "s|^[[:space:]]*//'routes' => '1',|        'routes' => '1',|" \
+                "$asset_dir/default/app/config/config.php"
             find "$asset_dir" -name '.htaccess' -type f -delete
             ;;
         laravel|laravel-api)
@@ -300,7 +308,7 @@ prepare_runtime_directories() {
         symfony)
             chmod -R a+rwX "$asset_dir/var"
             ;;
-        webrick-sharded|webrick-fused)
+        webrick-sharded|webrick-fused|webrick-generated)
             rm -f -- "$asset_dir/public/.htaccess"
             ;;
         yii-basic)
@@ -336,7 +344,7 @@ optimize_production() {
         hyperf)
             composer --working-dir="$asset_dir" dump-autoload --no-dev --classmap-authoritative --no-interaction
             ;;
-        webrick-sharded|webrick-fused)
+        webrick-sharded|webrick-fused|webrick-generated)
             rebuild_webrick_route_cache
             ;;
         fatfree|flight|kumbia|leaf|nette|pure-php|slim|yii-basic)
@@ -461,7 +469,7 @@ clear_cache() {
         nette) clear_directory "$asset_dir/temp/cache" ;;
         slim) clear_directory "$asset_dir/var/cache" ;;
         symfony) APP_ENV=prod APP_DEBUG=0 php "$asset_dir/bin/console" cache:clear --no-debug ;;
-        webrick-sharded|webrick-fused) rebuild_webrick_route_cache ;;
+        webrick-sharded|webrick-fused|webrick-generated) rebuild_webrick_route_cache ;;
         yii-basic) clear_directory "$asset_dir/runtime/cache" ;;
         flight) clear_directory "$asset_dir/app/cache" ;;
         hyperf) clear_directory "$asset_dir/runtime/container" ;;

@@ -4,3 +4,12 @@
 hello_world:
     path: /hello/index
     controller: App\Controller\HelloWorldController::index
+    methods: [GET]
+hello_world_dynamic_middle:
+    path: /hello/{value}/index
+    controller: App\Controller\HelloWorldController::index
+    methods: [GET]
+hello_world_dynamic_last:
+    path: /hello/index/{value}
+    controller: App\Controller\HelloWorldController::index
+    methods: [GET]

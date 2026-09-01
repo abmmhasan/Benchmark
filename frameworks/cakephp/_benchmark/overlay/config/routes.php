@@ -45,7 +45,14 @@ return function (RouteBuilder $routes): void {
     $routes->setRouteClass(DashedRoute::class);
 
     /* *** PHP-Frameworks-Bench *** */
-    $routes->connect('webroot/index.php/hello/index', ['controller' => 'HelloWorld', 'action' => 'display', 'home']);
+    $benchmarkTarget = ['controller' => 'HelloWorld', 'action' => 'display'];
+    $benchmarkMethodNotAllowed = ['controller' => 'HelloWorld', 'action' => 'methodNotAllowed'];
+    $routes->connect('webroot/index.php/hello/index', $benchmarkTarget)->setMethods(['GET']);
+    $routes->connect('webroot/index.php/hello/index', $benchmarkMethodNotAllowed)->setMethods(['POST']);
+    $routes->connect('webroot/index.php/hello/{value}/index', $benchmarkTarget)
+        ->setPass(['value'])->setMethods(['GET']);
+    $routes->connect('webroot/index.php/hello/index/{value}', $benchmarkTarget)
+        ->setPass(['value'])->setMethods(['GET']);
 
     $routes->scope('/', function (RouteBuilder $builder) {
         /*
@@ -92,4 +99,3 @@ return function (RouteBuilder $routes): void {
      * ```
      */
 };
-

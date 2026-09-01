@@ -9,7 +9,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 // such simple controller
 class HelloWorldController {
-    public function index(): Response {
+    public function index(?string $value = null): Response {
         return new Response('Hello World!');
     }
 }

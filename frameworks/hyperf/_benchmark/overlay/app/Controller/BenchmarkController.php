@@ -17,16 +17,7 @@ final class BenchmarkController
 
     public function hello(): PsrResponseInterface
     {
-        $server = $this->request->getServerParams();
-        $startedAt = (float) ($server['request_time_float'] ?? microtime(true));
-        $body = sprintf(
-            "Hello World!\n%' 8d:%f:%'.03d",
-            memory_get_peak_usage(),
-            max(0.0, microtime(true) - $startedAt),
-            count(get_included_files()),
-        );
-
-        return $this->response->raw($body)->withHeader('Content-Type', 'text/plain; charset=utf-8');
+        return $this->response->raw('Hello World!')->withHeader('Content-Type', 'text/plain; charset=utf-8');
     }
 
     public function environment(): PsrResponseInterface
