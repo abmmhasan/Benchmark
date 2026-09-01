@@ -1117,8 +1117,9 @@ namespace {
     $swooleGatewaySource = file_get_contents($bundledSuiteDirectory . '/.docker/swoole/nginx.conf');
     $assert(
         is_string($webrickSwooleSource)
-        && str_contains($webrickSwooleSource, 'RouterKernel::bootWithRegistrar')
-        && str_contains($webrickSwooleSource, 'new SwooleEmitter()')
+        && str_contains($webrickSwooleSource, 'benchmarkWebrickKernel($assetDirectory)')
+        && str_contains($webrickSwooleSource, 'SwooleRuntimeAdapter::swoole()')
+        && str_contains($webrickSwooleSource, '$kernel->handleRuntime($context)')
         && is_string($swooleEntrypointSource)
         && str_contains($swooleEntrypointSource, 'octane:start --server=swoole')
         && str_contains($swooleEntrypointSource, "APP_RUNTIME='Runtime\\Swoole\\Runtime'")
@@ -1185,14 +1186,39 @@ namespace {
     $webrickFrontController = file_get_contents(
         $bundledSuiteDirectory . '/_support/webrick/public/index.php',
     );
+    $webrickKernel = file_get_contents(
+        $bundledSuiteDirectory . '/_support/webrick/benchmark-kernel.php',
+    );
+    $webrickReleaseBuilder = file_get_contents(
+        $bundledSuiteDirectory . '/_support/webrick/build-release.php',
+    );
+    $webrickRoutes = file_get_contents(
+        $bundledSuiteDirectory . '/_support/webrick/routes.php',
+    );
+    $webrickHandler = file_get_contents(
+        $bundledSuiteDirectory . '/_support/webrick/benchmark-handler.php',
+    );
     $assert(
         is_string($webrickFrontController)
-        && str_contains($webrickFrontController, "'fused' => FusedMatcher::make()")
-        && str_contains($webrickFrontController, "'generated' => GeneratedMatcher::make()")
-        && str_contains($webrickFrontController, "'sharded' => ShardedMatcher::make()")
+        && str_contains($webrickFrontController, 'benchmarkWebrickKernel($assetDirectory)')
+        && str_contains($webrickFrontController, 'new DefaultEmitter()')
         && str_contains($webrickFrontController, "'/hello/index'") === false
+        && is_string($webrickKernel)
+        && str_contains($webrickKernel, "'fused' => FusedMatcher::make()->enableCache")
+        && str_contains($webrickKernel, "'generated' => GeneratedMatcher::make()->enableCache")
+        && str_contains($webrickKernel, "'sharded' => ShardedMatcher::make()->enableCache")
+        && str_contains($webrickKernel, 'CompiledRouterKernel::fromPrevalidatedArtifact')
+        && is_string($webrickReleaseBuilder)
+        && str_contains($webrickReleaseBuilder, '(new ReleaseCompiler())->compile(')
+        && str_contains($webrickReleaseBuilder, "environment: 'production'")
+        && is_string($webrickRoutes)
+        && str_contains($webrickRoutes, '[BenchmarkWebrickHandler::class')
+        && !str_contains($webrickRoutes, 'static fn')
+        && is_string($webrickHandler)
+        && str_contains($webrickHandler, 'final class BenchmarkWebrickHandler')
         && str_contains($lifecycleSource, '--matcher="$matcher" --cache="$cache"')
-        && str_contains($lifecycleSource, '--routes="$asset_dir/routes.php" --alias-fallback=0')
+        && str_contains($lifecycleSource, '--routes="$asset_dir/routes.php"')
+        && str_contains($lifecycleSource, 'php "$asset_dir/build-release.php"')
         && trim((string) file_get_contents(
             $bundledSuiteDirectory . '/webrick-sharded/_benchmark/overlay/matcher.php',
         )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'sharded';"
@@ -1202,7 +1228,7 @@ namespace {
         && trim((string) file_get_contents(
             $bundledSuiteDirectory . '/webrick-generated/_benchmark/overlay/matcher.php',
         )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'generated';",
-        'Webrick targets share one route and isolate the sharded, fused, and generated production matchers',
+        'Webrick 5 targets share one compiled production release and isolate the sharded, fused, and generated cached matchers',
     );
 
     $historyDirectory = sys_get_temp_dir() . '/benchmark-history-' . bin2hex(random_bytes(8));

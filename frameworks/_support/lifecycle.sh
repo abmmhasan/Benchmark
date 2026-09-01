@@ -198,11 +198,11 @@ rebuild_webrick_route_cache() {
             ;;
         webrick-fused)
             matcher="fused"
-            cache="$asset_dir/.route-cache/__routes.php"
+            cache="$asset_dir/.route-cache/fused.php"
             ;;
         webrick-generated)
             matcher="generated"
-            cache="$asset_dir/.route-cache/__generated.php"
+            cache="$asset_dir/.route-cache/generated.php"
             ;;
         *)
             printf 'Cannot build a Webrick route cache for: %s\n' "$target" >&2
@@ -220,8 +220,10 @@ rebuild_webrick_route_cache() {
     fi
     php "$asset_dir/webrick" route:cache \
         --matcher="$matcher" --cache="$cache" \
-        --routes="$asset_dir/routes.php" --alias-fallback=0
+        --routes="$asset_dir/routes.php"
+    php "$asset_dir/build-release.php"
     chmod -R a+rX "$asset_dir/.route-cache"
+    chmod -R a+rX "$asset_dir/.benchmark-release"
 }
 
 rebuild_fast_route_cache() {
