@@ -13,3 +13,19 @@ hello_world_dynamic_last:
     path: /hello/index/{value}
     controller: App\Controller\HelloWorldController::index
     methods: [GET]
+hello_world_dynamic_first:
+    path: /{value}/hello/index
+    controller: App\Controller\HelloWorldController::index
+    methods: [GET]
+hello_world_multiple:
+    path: /hello/pair/{first}/{second}
+    controller: App\Controller\HelloWorldController::index
+    methods: [GET]
+hello_world_static_precedence:
+    path: /hello/benchmark/fixed
+    controller: App\Controller\HelloWorldController::index
+    methods: [GET]
+hello_world_dynamic_overlap:
+    path: /hello/{value}/fixed
+    controller: App\Controller\HelloWorldController::index
+    methods: [GET]

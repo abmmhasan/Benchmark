@@ -16,7 +16,14 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $path === '/hello/index') {
     http_response_code(405);
     header('Allow: GET');
     echo 'Method Not Allowed';
-} elseif (!in_array($path, ['/hello/index', '/hello/42/index', '/hello/index/42'], true)) {
+} elseif (!in_array($path, [
+    '/hello/index',
+    '/hello/42/index',
+    '/hello/index/42',
+    '/42/hello/index',
+    '/hello/pair/42/84',
+    '/hello/benchmark/fixed',
+], true)) {
     http_response_code(404);
     echo 'Not Found';
 } else {

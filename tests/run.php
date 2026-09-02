@@ -355,6 +355,14 @@ namespace {
     $assert(isset($result['multiple']['req_per_min_mad']), 'repeated-run RPM variance is recorded');
     $assert($result['configuration']['responseValidation'] === true, 'reproduction metadata is recorded');
     $assert(
+        count($result['configuration']['routeScenarios']) === 1
+        && $result['configuration']['routeScenarios'][0]['key'] === 'default'
+        && $result['configuration']['routeScenarios'][0]['method'] === 'GET'
+        && $result['configuration']['routeScenarios'][0]['expectedStatus'] === 200
+        && $result['configuration']['routeScenarios'][0]['pattern'] === '/',
+        'route method, status, and logical pattern are recorded for methodology output',
+    );
+    $assert(
         $result['configuration']['loadGenerator'] === 'php-curl-multi',
         'load-generator implementation is recorded',
     );
@@ -667,11 +675,27 @@ namespace {
     );
     file_put_contents(
         $suiteDirectory . '/alpha/_benchmark/hello_world.sh',
-        "#!/bin/sh\nurl=\"\$base/\$fw/public/index.php/hello/index\"\n",
+        "#!/bin/sh\n"
+        . "route_static=\"GET 200 \$base/\$fw/public/index.php/hello/index\"\n"
+        . "route_dynamic_first=\"GET 200 \$base/\$fw/public/index.php/42/hello/index\"\n"
+        . "route_dynamic_middle=\"GET 200 \$base/\$fw/public/index.php/hello/42/index\"\n"
+        . "route_dynamic_last=\"GET 200 \$base/\$fw/public/index.php/hello/index/42\"\n"
+        . "route_multiple=\"GET 200 \$base/\$fw/public/index.php/hello/pair/42/84\"\n"
+        . "route_static_precedence=\"GET 200 \$base/\$fw/public/index.php/hello/benchmark/fixed\"\n"
+        . "route_not_found=\"GET 404 \$base/\$fw/public/index.php/benchmark/not-found\"\n"
+        . "route_method_not_allowed=\"POST 405 \$base/\$fw/public/index.php/hello/index\"\n",
     );
     file_put_contents(
         $suiteDirectory . '/beta/_benchmark/hello_world.sh',
-        "#!/bin/sh\nurl=\"\$base/\$fw/web/index.php?r=hello/index\"\n",
+        "#!/bin/sh\n"
+        . "route_static=\"GET 200 \$base/\$fw/web/index.php?r=hello/index\"\n"
+        . "route_dynamic_first=\"GET 200 \$base/\$fw/web/index.php?r=42/hello/index\"\n"
+        . "route_dynamic_middle=\"GET 200 \$base/\$fw/web/index.php?r=hello/42/index\"\n"
+        . "route_dynamic_last=\"GET 200 \$base/\$fw/web/index.php?r=hello/index/42\"\n"
+        . "route_multiple=\"GET 200 \$base/\$fw/web/index.php?r=hello/pair/42/84\"\n"
+        . "route_static_precedence=\"GET 200 \$base/\$fw/web/index.php?r=hello/benchmark/fixed\"\n"
+        . "route_not_found=\"GET 404 \$base/\$fw/web/index.php?r=benchmark/not-found\"\n"
+        . "route_method_not_allowed=\"POST 405 \$base/\$fw/web/index.php?r=hello/index\"\n",
     );
     file_put_contents($suiteDirectory . '/alpha/_benchmark/setup.sh', "#!/bin/sh\nexit 0\n");
     file_put_contents($suiteDirectory . '/alpha/_benchmark/clean.sh', "#!/bin/sh\nexit 0\n");
@@ -747,6 +771,27 @@ namespace {
         $assert(
             $suiteConfigs[0]->getUrl() === 'http://127.0.0.1/bench/beta/web/index.php?r=hello/index',
             'framework target URL is imported without executing shell code',
+        );
+        $assert(
+            array_map(
+                static fn(RouteScenario $scenario): string => sprintf(
+                    '%s %d %s',
+                    $scenario->getMethod()->value,
+                    $scenario->getExpectedStatus(),
+                    $scenario->getUrl(),
+                ),
+                $suiteConfigs[0]->getRouteScenarios(),
+            ) === [
+                'GET 200 http://127.0.0.1/bench/beta/web/index.php?r=hello/index',
+                'GET 200 http://127.0.0.1/bench/beta/web/index.php?r=42/hello/index',
+                'GET 200 http://127.0.0.1/bench/beta/web/index.php?r=hello/42/index',
+                'GET 200 http://127.0.0.1/bench/beta/web/index.php?r=hello/index/42',
+                'GET 200 http://127.0.0.1/bench/beta/web/index.php?r=hello/pair/42/84',
+                'GET 200 http://127.0.0.1/bench/beta/web/index.php?r=hello/benchmark/fixed',
+                'GET 404 http://127.0.0.1/bench/beta/web/index.php?r=benchmark/not-found',
+                'POST 405 http://127.0.0.1/bench/beta/web/index.php?r=hello/index',
+            ],
+            'each route scenario is imported explicitly without deriving URL paths',
         );
 
         $textResponse = "Hello World!\n 1048576:0.001250:17";
@@ -1007,16 +1052,37 @@ namespace {
     $symfonyScenarios = $symfonyConfig->getRouteScenarios();
     $assert(
         array_map(static fn(RouteScenario $scenario): string => $scenario->getKey(), $symfonyScenarios)
-            === ['static', 'dynamic-middle', 'dynamic-last', 'not-found', 'method-not-allowed']
+            === [
+                'static',
+                'dynamic-first',
+                'dynamic-middle',
+                'dynamic-last',
+                'multiple-parameters',
+                'static-precedence',
+                'not-found',
+                'method-not-allowed',
+            ]
         && array_map(static fn(RouteScenario $scenario): int => $scenario->getExpectedStatus(), $symfonyScenarios)
-            === [200, 200, 200, 404, 405]
-        && $symfonyScenarios[4]->getMethod() === HttpMethod::POST
-        && $symfonyScenarios[4]->isSafeForWarmUp(),
-        'every bundled target receives the five-route mixed workload contract',
+            === [200, 200, 200, 200, 200, 200, 404, 405]
+        && array_map(static fn(RouteScenario $scenario): ?string => $scenario->getPattern(), $symfonyScenarios)
+            === [
+                '/hello/index',
+                '/{value}/hello/index',
+                '/hello/{value}/index',
+                '/hello/index/{value}',
+                '/hello/pair/{first}/{second}',
+                '/hello/benchmark/fixed',
+                '/benchmark/not-found',
+                '/hello/index',
+            ]
+        && $symfonyScenarios[7]->getMethod() === HttpMethod::POST
+        && $symfonyScenarios[7]->isSafeForWarmUp(),
+        'every bundled target receives the eight-route mixed workload contract',
     );
     $allLifecycleScriptsExist = true;
     $allGeneratedFilesAreIgnored = true;
     $allTargetsUseAssetDirectory = true;
+    $allTargetsDeclareRouteWorkload = true;
     foreach ($bundledTargets as $target) {
         foreach (['setup', 'update', 'clean', 'clear-cache', 'hello_world'] as $action) {
             $allLifecycleScriptsExist = $allLifecycleScriptsExist
@@ -1033,10 +1099,23 @@ namespace {
             && ($target === 'hyperf'
                 ? str_contains($helloWorld, '$base/$fw/hello/index')
                 : str_contains($helloWorld, '$base/$fw/asset/'));
+        $allTargetsDeclareRouteWorkload = $allTargetsDeclareRouteWorkload
+            && is_string($helloWorld)
+            && substr_count($helloWorld, 'route_') === 8
+            && str_contains($helloWorld, 'route_static="GET 200 ')
+            && str_contains($helloWorld, 'route_dynamic_first="GET 200 ')
+            && str_contains($helloWorld, 'route_dynamic_middle="GET 200 ')
+            && str_contains($helloWorld, 'route_dynamic_last="GET 200 ')
+            && str_contains($helloWorld, 'route_multiple="GET 200 ')
+            && str_contains($helloWorld, 'route_static_precedence="GET 200 ')
+            && str_contains($helloWorld, 'route_not_found="GET 404 ')
+            && str_contains($helloWorld, 'route_method_not_allowed="POST 405 ')
+            && !str_contains($helloWorld, "\nurl=");
     }
     $assert($allLifecycleScriptsExist, 'every bundled target provides the complete lifecycle script set');
     $assert($allGeneratedFilesAreIgnored, 'every bundled target ignores generated create-project files');
     $assert($allTargetsUseAssetDirectory, 'every bundled target serves its generated application from asset');
+    $assert($allTargetsDeclareRouteWorkload, 'every bundled target explicitly declares all eight route scenarios');
     $frameworkIgnore = file_get_contents($bundledSuiteDirectory . '/.gitignore');
     $assert(
         is_string($frameworkIgnore)
@@ -1050,6 +1129,8 @@ namespace {
     $assert(
         is_string($lifecycleSource)
         && str_contains($lifecycleSource, 'composer create-project')
+        && str_contains($lifecycleSource, 'package="infocyph/webrick:~5.1.0"')
+        && str_contains($lifecycleSource, 'local project_package="${package%%:*}"')
         && str_contains($lifecycleSource, '--no-dev --remove-vcs')
         && str_contains($lifecycleSource, '--stability=stable')
         && str_contains($lifecycleSource, '.benchmark-project-version')
@@ -1063,7 +1144,7 @@ namespace {
         && str_contains($lifecycleSource, 'cp -a "$build_dir/." "$asset_dir/"')
         && !str_contains($lifecycleSource, 'rm -f -- "$build_dir/.gitignore"')
         && preg_match('/create-project[^\n]*:[0-9]/', $lifecycleSource) !== 1,
-        'Composer project creation installs unversioned assets and preserves framework ignore rules',
+        'Composer project creation uses stable framework releases, pins Webrick 5.1, and preserves framework ignore rules',
     );
     $assert(
         is_string($lifecycleSource)
@@ -1208,6 +1289,10 @@ namespace {
         && str_contains($webrickKernel, "'generated' => GeneratedMatcher::make()->enableCache")
         && str_contains($webrickKernel, "'sharded' => ShardedMatcher::make()->enableCache")
         && str_contains($webrickKernel, 'CompiledRouterKernel::fromPrevalidatedArtifact')
+        && str_contains($webrickKernel, 'new ReleaseManifestLoader()->load(')
+        && str_contains($webrickKernel, '$release[\'intermix\'][\'digest\']')
+        && str_contains($webrickKernel, 'trustedArtifactFingerprint:')
+        && !str_contains($webrickKernel, 'sha256')
         && is_string($webrickReleaseBuilder)
         && str_contains($webrickReleaseBuilder, '(new ReleaseCompiler())->compile(')
         && str_contains($webrickReleaseBuilder, "environment: 'production'")
@@ -1219,6 +1304,10 @@ namespace {
         && str_contains($lifecycleSource, '--matcher="$matcher" --cache="$cache"')
         && str_contains($lifecycleSource, '--routes="$asset_dir/routes.php"')
         && str_contains($lifecycleSource, 'php "$asset_dir/build-release.php"')
+        && str_contains($lifecycleSource, 'verify_webrick_version')
+        && str_contains($lifecycleSource, 'verify_webrick_release')
+        && str_contains($lifecycleSource, 'release.php')
+        && str_contains($lifecycleSource, 'hash_file("xxh128", $path)')
         && trim((string) file_get_contents(
             $bundledSuiteDirectory . '/webrick-sharded/_benchmark/overlay/matcher.php',
         )) === "<?php\n\ndeclare(strict_types=1);\n\nreturn 'sharded';"
@@ -1306,19 +1395,25 @@ namespace {
         && str_contains($dashboard, 'humanDateTime')
         && str_contains($dashboard, 'prefers-color-scheme: dark')
         && str_contains($dashboard, 'Theme · Auto')
+        && str_contains($dashboard, 'id="filters-button"')
+        && str_contains($dashboard, 'Filter framework candidates')
+        && str_contains($dashboard, 'Active facets combine with AND')
+        && str_contains($dashboard, 'Pure PHP remains visible as a common comparison baseline')
         && str_contains($dashboard, 'id="category-filter"')
         && str_contains($dashboard, 'aria-label="Open report menu"')
+        && str_contains($dashboard, 'aria-label="Report location"')
+        && str_contains($dashboard, 'href="../" aria-label="Back to runtime report history"')
+        && str_contains($dashboard, 'href="../../">All runtime profiles</a>')
         && str_contains($dashboard, '<svg viewBox="0 0 24 24"')
         && !str_contains($dashboard, '>Report menu</button>')
         && str_contains($dashboard, 'Sustainable leaders')
         && str_contains($dashboard, 'id="architecture-filter"')
         && str_contains($dashboard, 'id="di-filter"')
         && str_contains($dashboard, 'id="route-dispatcher-filter"')
-        && str_contains($dashboard, "placeholder:'Type'")
-        && str_contains($dashboard, "placeholder:'Architecture'")
-        && str_contains($dashboard, "placeholder:'Built-in DI'")
-        && str_contains($dashboard, "placeholder:'Route dispatcher'")
-        && !str_contains($dashboard, "new Option('All','all')")
+        && str_contains($dashboard, "placeholder:'Any scope'")
+        && str_contains($dashboard, "placeholder:'Any architecture'")
+        && str_contains($dashboard, '`All frameworks: ${filter.label(values[0])}`')
+        && str_contains($dashboard, 'id="clear-filters"')
         && str_contains($dashboard, 'Pure PHP baseline')
         && str_contains($dashboard, 'data-category="full-stack"')
         && str_contains($dashboard, 'data-category="route-only"')
@@ -1331,7 +1426,8 @@ namespace {
         && str_contains($dashboard, 'builtInDiMap')
         && str_contains($dashboard, 'routeDispatcherMap')
         && str_contains($dashboard, "entry.category==='baseline'||filterDefinitions.every")
-        && str_contains($dashboard, 'Full-featured route dispatcher')
+        && str_contains($dashboard, 'First-party router')
+        && str_contains($dashboard, 'stableFrameworks=entries.filter')
         && str_contains($dashboard, 'versionMap')
         && str_contains($dashboard, 'badge-version')
         && str_contains($dashboard, 'v3.2.1')
@@ -1352,8 +1448,14 @@ namespace {
         && str_contains($dashboard, 'serverRuntimeExtensionVersion')
         && str_contains($dashboard, "['Full Stack',entry=>entry.category==='full-stack']")
         && str_contains($dashboard, "['MVC/HMVC',entry=>entry.architecture==='mvc-hmvc']")
-        && str_contains($dashboard, 'server_execution_ms'),
-        'browser dashboard includes an icon action menu, self-labeling baseline-aware classification and capability filters, five framework-only leaders, system-aware themes, concurrency detail, and sortable data',
+        && str_contains($dashboard, 'server_execution_ms')
+        && str_contains($dashboard, 'Measured router patterns')
+        && str_contains($dashboard, 'id="route-pattern-table"')
+        && str_contains($dashboard, 'Iteration plan')
+        && str_contains($dashboard, 'measurementRepetitions')
+        && str_contains($dashboard, 'configuredMinimumRequests')
+        && str_contains($dashboard, 'firstConfiguration.routeScenarios'),
+        'browser dashboard includes clear baseline-aware AND filters, filter-aware leaders, exact route and iteration methodology, system-aware themes, concurrency detail, and sortable data',
     );
     $docsIndex = file_get_contents(dirname(__DIR__) . '/docs/index.html');
     $assert(
@@ -1391,7 +1493,8 @@ namespace {
         && str_contains($historyIndex, 'July 20, 2026 at 12:30 PM UTC')
         && str_contains($historyIndex, 'prefers-color-scheme:dark')
         && str_contains($historyIndex, 'data-local-time')
-        && str_contains($historyIndex, 'Monthly, reproducible reports'),
+        && str_contains($historyIndex, 'Monthly, reproducible reports')
+        && str_contains($historyIndex, 'href="../" aria-label="Back to all benchmark runtime profiles"'),
         'history index follows the system theme and localizes readable dates for the visitor',
     );
     $deleted = $history->deleteAll(true);

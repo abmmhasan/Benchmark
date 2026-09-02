@@ -16,5 +16,9 @@ $hello = static function ($request, $response) {
 $app->get('/hello/index', $hello);
 $app->get('/hello/{value}/index', $hello);
 $app->get('/hello/index/{value}', $hello);
+$app->get('/{value}/hello/index', $hello);
+$app->get('/hello/pair/{first}/{second}', $hello);
+$app->get('/hello/benchmark/fixed', $hello);
+$app->get('/hello/{value}/fixed', $hello);
 $app->run();
 require dirname(__DIR__, 3) . '/libs/output_data.php';

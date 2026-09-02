@@ -6,7 +6,7 @@
 namespace App\Http\Controllers;
 
 class HelloWorldController extends Controller {
-    public function index(?string $value = null) {
+    public function index(?string $value = null, ?string $first = null, ?string $second = null) {
         return response()->json([
             'status' => true,
             'message' => 'Hello World!',

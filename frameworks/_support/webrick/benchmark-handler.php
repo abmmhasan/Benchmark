@@ -18,6 +18,13 @@ final class BenchmarkWebrickHandler
         return self::response();
     }
 
+    public static function multiple(string $first, string $second): Response
+    {
+        unset($first, $second);
+
+        return self::response();
+    }
+
     private static function response(): Response
     {
         return Response::create(
