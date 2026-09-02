@@ -14,6 +14,10 @@ $hello = static function (): void { echo 'Hello World!'; };
 $app->router()->get('/index.php/hello/index', $hello);
 $app->router()->get('/index.php/hello/@value/index', $hello);
 $app->router()->get('/index.php/hello/index/@value', $hello);
+$app->router()->get('/index.php/@value/hello/index', $hello);
+$app->router()->get('/index.php/hello/pair/@first/@second', $hello);
+$app->router()->get('/index.php/hello/benchmark/fixed', $hello);
+$app->router()->get('/index.php/hello/@value/fixed', $hello);
 
 $app->start();
 require dirname(__DIR__, 3) . '/libs/output_data.php';

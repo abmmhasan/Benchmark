@@ -53,6 +53,14 @@ return function (RouteBuilder $routes): void {
         ->setPass(['value'])->setMethods(['GET']);
     $routes->connect('webroot/index.php/hello/index/{value}', $benchmarkTarget)
         ->setPass(['value'])->setMethods(['GET']);
+    $routes->connect('webroot/index.php/{value}/hello/index', $benchmarkTarget)
+        ->setPass(['value'])->setMethods(['GET']);
+    $routes->connect('webroot/index.php/hello/pair/{first}/{second}', $benchmarkTarget)
+        ->setPass(['first', 'second'])->setMethods(['GET']);
+    $routes->connect('webroot/index.php/hello/benchmark/fixed', $benchmarkTarget)
+        ->setMethods(['GET']);
+    $routes->connect('webroot/index.php/hello/{value}/fixed', $benchmarkTarget)
+        ->setPass(['value'])->setMethods(['GET']);
 
     $routes->scope('/', function (RouteBuilder $builder) {
         /*

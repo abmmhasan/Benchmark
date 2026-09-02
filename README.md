@@ -179,6 +179,23 @@ Framework folders are not auto-discovered. A target must be listed in
 `frameworks/config` and provide `_benchmark/hello_world.sh`; the config controls
 which targets run, their runtime, and their order.
 
+Every `hello_world.sh` explicitly declares the complete request workload. Each
+value contains the HTTP method, expected status, and target URL expression:
+
+```sh
+route_static="GET 200 $base/$fw/asset/public/index.php/hello/index"
+route_dynamic_first="GET 200 $base/$fw/asset/public/index.php/42/hello/index"
+route_dynamic_middle="GET 200 $base/$fw/asset/public/index.php/hello/42/index"
+route_dynamic_last="GET 200 $base/$fw/asset/public/index.php/hello/index/42"
+route_multiple="GET 200 $base/$fw/asset/public/index.php/hello/pair/42/84"
+route_static_precedence="GET 200 $base/$fw/asset/public/index.php/hello/benchmark/fixed"
+route_not_found="GET 404 $base/$fw/asset/public/index.php/benchmark/not-found"
+route_method_not_allowed="POST 405 $base/$fw/asset/public/index.php/hello/index"
+```
+
+The runner parses these declarations without executing the shell file. Missing,
+unsupported, or unsafe scenario definitions stop the run before measurement.
+
 Results are printed as Markdown and archived under `.benchmark-output/<UTC time>/`
 as canonical `results.json`, `report.md`, and an interactive Bootstrap 5.3.8
 `dashboard.html`. The history root also gets an `index.html` linking all runs.
@@ -291,11 +308,14 @@ next target. Concurrent phases continue for at least the configured minimum
 duration, subject to the hard request safety limit.
 
 Each framework phase uses one evenly distributed mixed route workload: a static
-route, a dynamic parameter in the middle, a dynamic parameter at the end, a 404,
-and a POST that must return 405. The successful routes must return the expected
-Hello World response, while the error routes must return their exact expected
-status and a non-empty body. These requests contribute to one combined result per
-framework; they are not displayed as five separate benchmark candidates.
+route; dynamic parameters at the first, middle, and last positions; multiple
+parameters; a static route overlapping a dynamic sibling; a 404; and a POST that
+must return 405. The successful routes must return the expected Hello World
+response, while the error routes must return their exact expected status and a
+non-empty body. Their URLs, methods, and expected statuses come directly from
+that framework's `hello_world.sh`; the runner does not derive route paths. These
+requests contribute to one combined result per framework; they are not displayed
+as eight separate benchmark candidates.
 
 With two or three repetitions, a concurrency level is stable only when its RPM
 spread is within `stabilityThreshold()` (5% by default). Unstable levels remain in

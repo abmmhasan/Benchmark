@@ -3,7 +3,11 @@
 class HelloController extends AppController
 {
 
-    public function index(mixed ...$values)
+    public function index(
+        mixed $first = null,
+        mixed $second = null,
+        mixed $third = null,
+    )
     {
         // View without template and view
         View::select(null, null);

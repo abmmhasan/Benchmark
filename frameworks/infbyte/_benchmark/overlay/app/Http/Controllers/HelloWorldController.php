@@ -18,6 +18,11 @@ final readonly class HelloWorldController
         return self::response();
     }
 
+    public static function multiple(?string $first = null, ?string $second = null): Response
+    {
+        return self::response();
+    }
+
     private static function response(): Response
     {
         return Response::create('Hello World!', headers: ['Content-Type' => 'text/plain; charset=UTF-8']);

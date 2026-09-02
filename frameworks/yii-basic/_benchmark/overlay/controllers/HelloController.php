@@ -20,7 +20,11 @@ class HelloController extends Controller {
         ];
     }
 
-    public function actionIndex(?string $value = null) {
+    public function actionIndex(
+        ?string $value = null,
+        ?string $first = null,
+        ?string $second = null,
+    ) {
         return 'Hello World!';
     }
 }

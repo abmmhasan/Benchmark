@@ -10,7 +10,11 @@ namespace App\Controller;
 // such simple controller
 class HelloWorldController extends AppController {
 
-    public function display(?string $value = null)
+    public function display(
+        ?string $value = null,
+        ?string $first = null,
+        ?string $second = null,
+    )
     {
         return $this->response->withStringBody('Hello World!');
         // uncomment this line for php-fpm

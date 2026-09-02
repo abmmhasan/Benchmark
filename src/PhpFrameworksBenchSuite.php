@@ -383,62 +383,21 @@ final class PhpFrameworksBenchSuite
         $configs = [];
         foreach ($selected as $target) {
             self::assertTargetName($target);
-            $staticUrl = $this->targetUrl($target);
+            $routeScenarios = $this->targetRouteScenarios($target);
+            $staticScenario = $routeScenarios[0];
             $configs[] = new BenchmarkConfig(
-                url: $staticUrl,
-                method: HttpMethod::GET,
+                url: $staticScenario->getUrl(),
+                method: $staticScenario->getMethod(),
                 headers: [
                     'Accept' => 'text/plain, application/json',
                     'Cache-Control' => 'no-cache',
                 ],
-                expectedStatus: 200,
+                expectedStatus: $staticScenario->getExpectedStatus(),
                 name: $target,
-                responseValidator: self::isExpectedResponse(...),
+                responseValidator: $staticScenario->getResponseValidator(),
                 responseMemoryExtractor: self::extractMemoryBytes(...),
                 responseMetricsExtractor: self::extractResponseMetrics(...),
-                routeScenarios: [
-                    new RouteScenario(
-                        'static',
-                        'Static',
-                        $staticUrl,
-                        HttpMethod::GET,
-                        200,
-                        self::isExpectedResponse(...),
-                    ),
-                    new RouteScenario(
-                        'dynamic-middle',
-                        'Dynamic middle',
-                        self::replaceRoute($staticUrl, 'hello/42/index'),
-                        HttpMethod::GET,
-                        200,
-                        self::isExpectedResponse(...),
-                    ),
-                    new RouteScenario(
-                        'dynamic-last',
-                        'Dynamic last',
-                        self::replaceRoute($staticUrl, 'hello/index/42'),
-                        HttpMethod::GET,
-                        200,
-                        self::isExpectedResponse(...),
-                    ),
-                    new RouteScenario(
-                        'not-found',
-                        '404',
-                        self::replaceRoute($staticUrl, 'benchmark/not-found'),
-                        HttpMethod::GET,
-                        404,
-                        self::isExpectedErrorResponse(...),
-                    ),
-                    new RouteScenario(
-                        'method-not-allowed',
-                        '405',
-                        $staticUrl,
-                        HttpMethod::POST,
-                        405,
-                        self::isExpectedErrorResponse(...),
-                        safeForWarmUp: true,
-                    ),
-                ],
+                routeScenarios: $routeScenarios,
             );
         }
 
@@ -497,18 +456,63 @@ final class PhpFrameworksBenchSuite
         ];
     }
 
-    private function targetUrl(string $target): string
+    /** @return list<RouteScenario> */
+    private function targetRouteScenarios(string $target): array
     {
         $definition = file_get_contents($this->helloWorldFile($target));
         if (!is_string($definition)) {
             throw new RuntimeException("Unable to read hello-world definition for {$target}");
         }
-        if (preg_match('/^\s*url\s*=\s*(["\'])(?<expression>.*?)\1\s*$/m', $definition, $match) !== 1) {
-            throw new RuntimeException("Unable to read target URL for {$target}");
+
+        $specifications = [
+            ['route_static', 'static', 'Static', false, '/hello/index'],
+            ['route_dynamic_first', 'dynamic-first', 'Dynamic first', false, '/{value}/hello/index'],
+            ['route_dynamic_middle', 'dynamic-middle', 'Dynamic middle', false, '/hello/{value}/index'],
+            ['route_dynamic_last', 'dynamic-last', 'Dynamic last', false, '/hello/index/{value}'],
+            ['route_multiple', 'multiple-parameters', 'Multiple parameters', false, '/hello/pair/{first}/{second}'],
+            ['route_static_precedence', 'static-precedence', 'Static precedence', false, '/hello/benchmark/fixed'],
+            ['route_not_found', 'not-found', '404', false, '/benchmark/not-found'],
+            ['route_method_not_allowed', 'method-not-allowed', '405', true, '/hello/index'],
+        ];
+        $scenarios = [];
+        foreach ($specifications as [$variable, $key, $label, $safeForWarmUp, $routePattern]) {
+            $definitionPattern = '/^\s*' . preg_quote($variable, '/') . '\s*=\s*(["\'])(?<definition>.*?)\1\s*$/m';
+            if (preg_match($definitionPattern, $definition, $match) !== 1) {
+                throw new RuntimeException("Missing {$variable} definition for {$target}");
+            }
+            if (preg_match('/^(?<method>[A-Z]+)\s+(?<status>\d{3})\s+(?<url>\S+)$/', $match['definition'], $parts) !== 1) {
+                throw new RuntimeException("Invalid {$variable} definition for {$target}");
+            }
+
+            $method = HttpMethod::tryFrom($parts['method']);
+            if ($method === null) {
+                throw new RuntimeException("Unsupported {$variable} HTTP method for {$target}");
+            }
+            $status = (int) $parts['status'];
+            $url = $this->resolveTargetUrl($target, $parts['url']);
+            $scenarios[] = new RouteScenario(
+                $key,
+                $label,
+                $url,
+                $method,
+                $status,
+                $status < 400 ? self::isExpectedResponse(...) : self::isExpectedErrorResponse(...),
+                safeForWarmUp: $safeForWarmUp ? true : null,
+                pattern: $routePattern,
+            );
         }
 
+        $static = $scenarios[0];
+        if ($static->getMethod() !== HttpMethod::GET || $static->getExpectedStatus() !== 200) {
+            throw new RuntimeException("The static route for {$target} must declare GET 200");
+        }
+
+        return $scenarios;
+    }
+
+    private function resolveTargetUrl(string $target, string $expression): string
+    {
         $prefix = '$base/$fw';
-        $expression = $match['expression'];
         if (!str_starts_with($expression, $prefix)) {
             throw new RuntimeException("Unsupported target URL expression for {$target}");
         }
@@ -524,21 +528,6 @@ final class PhpFrameworksBenchSuite
         }
 
         return $url;
-    }
-
-    private static function replaceRoute(string $url, string $route): string
-    {
-        $position = strrpos($url, 'hello/index');
-        if ($position === false) {
-            throw new RuntimeException("Unable to derive route scenario from {$url}");
-        }
-
-        $scenarioUrl = substr_replace($url, $route, $position, strlen('hello/index'));
-        if (filter_var($scenarioUrl, FILTER_VALIDATE_URL) === false) {
-            throw new RuntimeException("Invalid route scenario URL generated from {$url}");
-        }
-
-        return $scenarioUrl;
     }
 
     private function helloWorldFile(string $target): string

@@ -15,6 +15,10 @@ $config['components']['urlManager'] = [
         'hello/index' => 'hello/index',
         'hello/<value:[^/]+>/index' => 'hello/index',
         'hello/index/<value:[^/]+>' => 'hello/index',
+        '<value:[^/]+>/hello/index' => 'hello/index',
+        'hello/pair/<first:[^/]+>/<second:[^/]+>' => 'hello/index',
+        'hello/benchmark/fixed' => 'hello/index',
+        'hello/<value:[^/]+>/fixed' => 'hello/index',
     ],
 ];
 

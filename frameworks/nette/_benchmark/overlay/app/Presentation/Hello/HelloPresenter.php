@@ -32,4 +32,24 @@ final class HelloPresenter extends Nette\Application\UI\Presenter
     {
         $this->sendResponse(new TextResponse('Hello World!'));
     }
+
+    public function actionFirst(?string $value = null): void
+    {
+        $this->sendResponse(new TextResponse('Hello World!'));
+    }
+
+    public function actionMultiple(?string $first = null, ?string $second = null): void
+    {
+        $this->sendResponse(new TextResponse('Hello World!'));
+    }
+
+    public function actionPrecedence(): void
+    {
+        $this->sendResponse(new TextResponse('Hello World!'));
+    }
+
+    public function actionOverlap(?string $value = null): void
+    {
+        $this->sendResponse(new TextResponse('Hello World!'));
+    }
 }

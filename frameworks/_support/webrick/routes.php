@@ -19,3 +19,23 @@ $registrar->get(
     [BenchmarkWebrickHandler::class, 'dynamic'],
     'hello.dynamic-last',
 );
+$registrar->get(
+    '/{value}/hello/index',
+    [BenchmarkWebrickHandler::class, 'dynamic'],
+    'hello.dynamic-first',
+);
+$registrar->get(
+    '/hello/pair/{first}/{second}',
+    [BenchmarkWebrickHandler::class, 'multiple'],
+    'hello.multiple',
+);
+$registrar->get(
+    '/hello/benchmark/fixed',
+    [BenchmarkWebrickHandler::class, 'hello'],
+    'hello.static-precedence',
+);
+$registrar->get(
+    '/hello/{value}/fixed',
+    [BenchmarkWebrickHandler::class, 'dynamic'],
+    'hello.dynamic-overlap',
+);

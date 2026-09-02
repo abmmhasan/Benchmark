@@ -18,6 +18,10 @@ final class RouterFactory
             ->withPath('index.php')
             ->addRoute('hello/<value>/index', 'Hello:middle')
             ->addRoute('hello/index/<value>', 'Hello:last')
+            ->addRoute('<value>/hello/index', 'Hello:first')
+            ->addRoute('hello/pair/<first>/<second>', 'Hello:multiple')
+            ->addRoute('hello/benchmark/fixed', 'Hello:precedence')
+            ->addRoute('hello/<value>/fixed', 'Hello:overlap')
             ->addRoute('hello/index', 'Hello:default');
 
         return $router;

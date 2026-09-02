@@ -898,6 +898,17 @@ final class BenchmarkRunner
                 ),
                 $config->getRouteScenarios(),
             ),
+            'routeScenarios' => array_map(
+                static fn(RouteScenario $scenario): array => [
+                    'key' => $scenario->getKey(),
+                    'label' => $scenario->getLabel(),
+                    'method' => $scenario->getMethod()->value,
+                    'expectedStatus' => $scenario->getExpectedStatus(),
+                    'pattern' => $scenario->getPattern()
+                        ?? (parse_url($scenario->getUrl(), PHP_URL_PATH) ?: '/'),
+                ],
+                $config->getRouteScenarios(),
+            ),
             'loadGenerator' => 'php-curl-multi',
             'phpVersion' => PHP_VERSION,
             'phpSapi' => PHP_SAPI,
@@ -1361,7 +1372,10 @@ final class BenchmarkRunner
     {
         return match (true) {
             is_bool($value) => $value ? 'yes' : 'no',
-            is_array($value) => implode(', ', array_map(static fn(mixed $item): string => (string) $item, $value)),
+            is_array($value) => json_encode(
+                $value,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ),
             $value === null, $value === '' => '—',
             default => (string) $value,
         };
@@ -1435,7 +1449,12 @@ final class BenchmarkRunner
                 }
             }
             foreach ($result['configuration'] as $key => $value) {
-                $metrics["configuration.{$key}"] = is_array($value) ? implode(',', $value) : $value;
+                $metrics["configuration.{$key}"] = is_array($value)
+                    ? json_encode(
+                        $value,
+                        JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+                    )
+                    : $value;
             }
             $flat[$name] = $metrics;
         }

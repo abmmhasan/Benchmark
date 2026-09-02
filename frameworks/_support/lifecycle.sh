@@ -37,7 +37,7 @@ case "$target" in
     pure-php) package="" ;;
     slim) package="slim/slim-skeleton" ;;
     symfony) package="symfony/skeleton" ;;
-    webrick-sharded|webrick-fused|webrick-generated) package="infocyph/webrick" ;;
+    webrick-sharded|webrick-fused|webrick-generated) package="infocyph/webrick:~5.1.0" ;;
     yii-basic) package="yiisoft/yii2-app-basic" ;;
     *) printf 'Unknown framework target: %s\n' "$target" >&2; exit 2 ;;
 esac
@@ -187,6 +187,88 @@ install_all_infbyte_modules() {
     ' <<< "$manifest"
 }
 
+verify_webrick_version() {
+    local metadata="$asset_dir/.benchmark-project-version"
+    local installed_package
+    local installed_version
+
+    if [[ ! -f "$metadata" ]]; then
+        printf 'Missing Webrick project-version metadata: %s\n' "$metadata" >&2
+        exit 1
+    fi
+
+    installed_package="$(sed -n '1p' "$metadata")"
+    installed_version="$(sed -n '2p' "$metadata")"
+    installed_version="${installed_version#v}"
+
+    if [[ "$installed_package" != 'infocyph/webrick' ]]; then
+        printf 'Unexpected Webrick benchmark package: %s\n' "$installed_package" >&2
+        exit 1
+    fi
+
+    case "$installed_version" in
+        5.1|5.1.[0-9]*)
+            case "$installed_version" in
+                *-dev*|*alpha*|*beta*|*RC*)
+                    printf 'Expected stable Webrick 5.1.x, installed: %s\n' "$installed_version" >&2
+                    exit 1
+                    ;;
+            esac
+            printf 'Webrick benchmark version: %s\n' "$installed_version"
+            ;;
+        *)
+            printf 'Expected stable Webrick 5.1.x, installed: %s\n' "$installed_version" >&2
+            exit 1
+            ;;
+    esac
+}
+
+verify_webrick_release() {
+    local runtime_manifest="$asset_dir/.benchmark-release/release.php"
+
+    if [[ ! -f "$runtime_manifest" ]]; then
+        printf 'Missing Webrick runtime release manifest: %s\n' "$runtime_manifest" >&2
+        exit 1
+    fi
+
+    php -r '
+        $assetDirectory = $argv[1];
+        require $assetDirectory . "/vendor/autoload.php";
+
+        $release = (new Infocyph\Webrick\Router\Build\ReleaseManifestLoader())
+            ->load($assetDirectory . "/.benchmark-release/release.json");
+        if (($release["format"] ?? null) !== 2) {
+            fwrite(STDERR, "Expected Webrick release manifest format 2\n");
+            exit(1);
+        }
+
+        $intermix = $release["intermix"] ?? null;
+        $webrick = $release["webrick"] ?? null;
+        if (!is_array($intermix) || !is_array($webrick)) {
+            fwrite(STDERR, "Missing InterMix/Webrick release metadata\n");
+            exit(1);
+        }
+        if (array_key_exists("sha256", $intermix) || array_key_exists("sha256", $webrick)) {
+            fwrite(STDERR, "Legacy SHA-256 release metadata detected\n");
+            exit(1);
+        }
+
+        foreach (["InterMix" => $intermix, "Webrick" => $webrick] as $name => $artifact) {
+            $path = $artifact["path"] ?? null;
+            $digest = $artifact["digest"] ?? null;
+            if (!is_string($path) || !is_file($path) || !is_string($digest)) {
+                fwrite(STDERR, "Missing {$name} release artifact\n");
+                exit(1);
+            }
+            $actual = hash_file("xxh128", $path);
+            if (!is_string($actual) || !hash_equals($digest, $actual)) {
+                fwrite(STDERR, "Invalid {$name} xxh128 artifact digest\n");
+                exit(1);
+            }
+        }
+    ' "$asset_dir"
+}
+
 rebuild_webrick_route_cache() {
     local matcher
     local cache
@@ -222,6 +304,7 @@ rebuild_webrick_route_cache() {
         --matcher="$matcher" --cache="$cache" \
         --routes="$asset_dir/routes.php"
     php "$asset_dir/build-release.php"
+    verify_webrick_release
     chmod -R a+rX "$asset_dir/.route-cache"
     chmod -R a+rX "$asset_dir/.benchmark-release"
 }
@@ -369,6 +452,7 @@ install_persistent_runtime_adapter() {
 }
 
 setup_project() {
+    local project_package="${package%%:*}"
     local -a create_project_options=(
         --prefer-dist --no-cache --no-interaction
         --no-dev --remove-vcs --stability=stable
@@ -394,8 +478,8 @@ setup_project() {
         project_version=""
         while IFS= read -r line; do
             case "$line" in
-                *"Installing $package ("*")"*)
-                    project_version="${line#*"Installing $package ("}"
+                *"Installing $project_package ("*")"*)
+                    project_version="${line#*"Installing $project_package ("}"
                     project_version="${project_version%%)*}"
                     break
                     ;;
@@ -408,7 +492,7 @@ setup_project() {
 
         rm -rf -- "$build_dir/_benchmark"
         cp -a "$build_dir/." "$asset_dir/"
-        printf '%s\n%s\n' "$package" "$project_version" > "$asset_dir/.benchmark-project-version"
+        printf '%s\n%s\n' "$project_package" "$project_version" > "$asset_dir/.benchmark-project-version"
         rm -rf -- "$build_dir"
         rm -f -- "$project_version_log"
         build_dir=""
@@ -448,6 +532,10 @@ setup_project() {
         fi
         composer --working-dir="$asset_dir" install "${install_options[@]}"
     fi
+
+    case "$target" in
+        webrick-sharded|webrick-fused|webrick-generated) verify_webrick_version ;;
+    esac
 
     prepare_runtime_directories
     optimize_production

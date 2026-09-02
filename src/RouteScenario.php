@@ -21,6 +21,7 @@ final readonly class RouteScenario
         private int $expectedStatus,
         callable $responseValidator,
         ?bool $safeForWarmUp = null,
+        private ?string $pattern = null,
     ) {
         if (preg_match('/^[a-z][a-z0-9-]{0,63}$/', $key) !== 1) {
             throw new InvalidArgumentException("Invalid route scenario key: {$key}");
@@ -33,6 +34,9 @@ final readonly class RouteScenario
         }
         if ($expectedStatus < 100 || $expectedStatus >= 500) {
             throw new InvalidArgumentException("Invalid route scenario status: {$expectedStatus}");
+        }
+        if ($pattern !== null && trim($pattern) === '') {
+            throw new InvalidArgumentException('Route scenario pattern cannot be empty');
         }
 
         $this->responseValidator = Closure::fromCallable($responseValidator);
@@ -74,5 +78,10 @@ final readonly class RouteScenario
     public function isSafeForWarmUp(): bool
     {
         return $this->safeForWarmUp;
+    }
+
+    public function getPattern(): ?string
+    {
+        return $this->pattern;
     }
 }

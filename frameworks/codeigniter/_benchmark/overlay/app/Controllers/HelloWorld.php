@@ -9,7 +9,7 @@ use CodeIgniter\HTTP\ResponseInterface;
 
 class HelloWorld extends BaseController
 {
-    public function index(?string $value = null): string
+    public function index(mixed ...$values): string
     {
         return 'Hello World!';
     }
