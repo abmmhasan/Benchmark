@@ -2,9 +2,7 @@
 
 declare(strict_types=1);
 
-use Infocyph\Webrick\Request\Request;
 use Infocyph\Webrick\Response\Emitter\DefaultEmitter;
-use Infocyph\Webrick\Response\Response;
 
 $assetDirectory = dirname(__DIR__);
 
@@ -25,17 +23,6 @@ $query = (string) ($_SERVER['QUERY_STRING'] ?? '');
 $_SERVER['REQUEST_URI'] = $path . ($query !== '' ? '?' . $query : '');
 
 $kernel = benchmarkWebrickKernel($assetDirectory);
-$request = Request::fromGlobals();
-$response = $kernel->handle($request);
+$response = $kernel->handle();
 
-ob_start();
-require dirname(__DIR__, 3) . '/libs/output_data.php';
-$benchmarkData = ob_get_clean();
-
-$response = Response::create(
-    (string) $response->getBody() . (is_string($benchmarkData) ? $benchmarkData : ''),
-    $response->getStatusCode(),
-    $response->getHeaders(),
-);
-
-new DefaultEmitter()->emit($response, $request);
+(new DefaultEmitter())->emit($response);
