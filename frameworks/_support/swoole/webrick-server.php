@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use Infocyph\Webrick\Response\Response;
 use Infocyph\Webrick\Runtime\Http\SwooleRuntimeAdapter;
 use Swoole\Http\Request as SwooleRequest;
 use Swoole\Http\Response as SwooleResponse;
@@ -42,6 +41,7 @@ $server->on('request', static function (
     SwooleResponse $outgoing,
 ) use ($adapter, $kernel): void {
     $startedAt = microtime(true);
+    $GLOBALS['benchmark_webrick_started_at'] = $startedAt;
 
     try {
         $context = $adapter->context(
@@ -50,17 +50,6 @@ $server->on('request', static function (
             $kernel->requiresHostRouting(),
         );
         $response = $kernel->handleRuntime($context);
-        $telemetry = sprintf(
-            "\n%' 8d:%f:%'.03d",
-            memory_get_peak_usage(),
-            max(0.0, microtime(true) - $startedAt),
-            max(0, count(get_included_files()) - 1),
-        );
-        $response = Response::create(
-            (string) $response->getBody() . $telemetry,
-            $response->getStatusCode(),
-            $response->getHeaders(),
-        );
         $adapter->write($response, $context);
     } catch (Throwable $exception) {
         error_log($exception->__toString());
@@ -70,6 +59,8 @@ $server->on('request', static function (
         $outgoing->status(500);
         $outgoing->header('Content-Type', 'text/plain; charset=utf-8');
         $outgoing->end('Internal Server Error');
+    } finally {
+        unset($GLOBALS['benchmark_webrick_started_at']);
     }
 });
 

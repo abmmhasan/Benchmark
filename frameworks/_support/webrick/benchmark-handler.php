@@ -27,8 +27,17 @@ final class BenchmarkWebrickHandler
 
     private static function response(): Response
     {
+        $startedAt = $GLOBALS['benchmark_webrick_started_at']
+            ?? (float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true));
+        $telemetry = sprintf(
+            "\n%' 8d:%f:%'.03d",
+            memory_get_peak_usage(),
+            max(0.0, microtime(true) - (float) $startedAt),
+            max(0, count(get_included_files()) - 1),
+        );
+
         return Response::create(
-            'Hello World!',
+            'Hello World!' . $telemetry,
             headers: ['Content-Type' => 'text/plain; charset=UTF-8'],
         );
     }
