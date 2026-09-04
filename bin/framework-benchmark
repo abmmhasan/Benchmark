@@ -34,6 +34,7 @@ Commands:
   list                List archived benchmark runs, newest first
   compare             Compare --current with --baseline
   dashboard           Regenerate and print the dashboard path for --run
+  archive-index       Regenerate the combined runtime/date archive index
   delete              Delete one archived --run; requires --force
   delete-all          Delete every archived run; requires --force
   help                Show this help
@@ -42,7 +43,7 @@ Common options:
   --suite=PATH          Framework suite directory (default: ./frameworks)
   --base-url=URL        Override the base URL read from suite config
   --target=NAMES        Comma-separated framework names; defaults to all
-  --runtime=PROFILE     Runtime profile: opcache (default) or swoole
+  --runtime=PROFILE     opcache (default), fpm, swoole, frankenphp, roadrunner, or workerman
   --output=PATH         History root (default: .benchmark-output)
   --history-limit=N     Keep only the newest N archived runs
   --replace-monthly     Replace an earlier run from the same UTC calendar month
@@ -290,7 +291,7 @@ if ($command === 'help' || flag($options, 'help')) {
 $knownCommands = [
     'run', 'doctor', 'check', 'setup', 'update', 'clean', 'clear-cache', 'restart',
     'reset-opcache', 'disable-fastcgi', 'docker', 'docker-stop', 'list', 'compare', 'dashboard',
-    'delete', 'delete-all',
+    'archive-index', 'delete', 'delete-all',
 ];
 if (!in_array($command, $knownCommands, true)) {
     fail("Unknown command: {$command}", true);
@@ -342,11 +343,18 @@ try {
         exit(0);
     }
 
+    if ($command === 'archive-index') {
+        $output = stringOption($options, 'output', '.benchmark-output');
+        BenchmarkHistory::refreshCombinedIndex($output);
+        fwrite(STDOUT, rtrim($output, '/') . "/index.html\n");
+        exit(0);
+    }
+
     $suite = suite($options);
     $manager = new PhpFrameworksBenchManager($suite);
     $runtime = strtolower((string) stringOption($options, 'runtime', 'opcache'));
-    if (!in_array($runtime, ['opcache', 'swoole'], true)) {
-        fail('--runtime must be opcache or swoole');
+    if (!in_array($runtime, PhpFrameworksBenchSuite::RUNTIME_PROFILES, true)) {
+        fail('--runtime must be opcache, fpm, swoole, frankenphp, roadrunner, or workerman');
     }
     $runtimeTargets = $suite->targetsForRuntime($runtime);
     $targets = listOption($options['target'] ?? null);

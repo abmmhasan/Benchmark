@@ -710,6 +710,9 @@ namespace {
     file_put_contents($suiteDirectory . '/beta/asset/.benchmark-project-version', "vendor/beta\n2.4.0\n");
     file_put_contents($suiteDirectory . '/.docker/apache.dockerfile', "FROM php:8.4-apache\n");
     file_put_contents($suiteDirectory . '/.docker/swoole.dockerfile', "FROM php:8.4-cli\n");
+    foreach (['fpm', 'frankenphp', 'roadrunner', 'workerman'] as $runtime) {
+        file_put_contents($suiteDirectory . "/.docker/{$runtime}.dockerfile", "FROM php:8.4-cli\n");
+    }
 
     try {
         $frameworkSuite = new PhpFrameworksBenchSuite($suiteDirectory);
@@ -888,6 +891,22 @@ namespace {
             && $swooleDockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-swoole', '9500/tcp'],
             'Docker Swoole uses an ephemeral loopback port and persistent-worker mount',
         );
+        foreach (
+            [
+                'fpm' => ['benchmark-frameworks-fpm', 8080],
+                'frankenphp' => ['benchmark-frameworks-frankenphp', 9500],
+                'roadrunner' => ['benchmark-frameworks-roadrunner', 9500],
+                'workerman' => ['benchmark-frameworks-workerman', 9500],
+            ] as $runtime => [$container, $containerPort]
+        ) {
+            $runtimePlan = $frameworkManager->dockerRuntime($runtime, dryRun: true);
+            $assert(
+                $runtimePlan[0]['status'] === 'dry-run'
+                && in_array("127.0.0.1::{$containerPort}", $runtimePlan[1]['command'], true)
+                && $runtimePlan[2]['command'] === ['docker', 'port', $container, "{$containerPort}/tcp"],
+                "Docker {$runtime} runtime dispatch supports dry-run and an ephemeral loopback port",
+            );
+        }
         $dockerStopPlan = $frameworkManager->stopDockerApache(dryRun: true);
         $assert(
             $dockerStopPlan['command'] === ['docker', 'stop', 'benchmark-frameworks-apache']
@@ -904,6 +923,10 @@ namespace {
         unlink($suiteDirectory . '/beta/asset/vendor/composer/installed.php');
         unlink($suiteDirectory . '/.docker/apache.dockerfile');
         unlink($suiteDirectory . '/.docker/swoole.dockerfile');
+        unlink($suiteDirectory . '/.docker/fpm.dockerfile');
+        unlink($suiteDirectory . '/.docker/frankenphp.dockerfile');
+        unlink($suiteDirectory . '/.docker/roadrunner.dockerfile');
+        unlink($suiteDirectory . '/.docker/workerman.dockerfile');
         unlink($suiteDirectory . '/config');
         rmdir($suiteDirectory . '/alpha/_benchmark');
         rmdir($suiteDirectory . '/alpha/asset');
@@ -937,7 +960,23 @@ namespace {
         && in_array('infbyte', $bundledSuite->targetsForRuntime('opcache'), true)
         && in_array('infbyte-full', $bundledSuite->targetsForRuntime('opcache'), true)
         && count($bundledSuite->targetsForRuntime('opcache')) === 19,
-        'bundled targets support native dual-runtime InfByte comparisons',
+        'bundled targets support native Swoole and OPcache comparisons',
+    );
+    $assert(
+        count($bundledSuite->targetsForRuntime('fpm')) === 19
+        && $bundledSuite->targetsForRuntime('frankenphp') === [
+            'infbyte', 'infbyte-full', 'laravel', 'laravel-api',
+            'webrick-sharded', 'webrick-fused', 'webrick-generated',
+        ]
+        && $bundledSuite->targetsForRuntime('roadrunner') === [
+            'infbyte', 'infbyte-full', 'laravel', 'laravel-api',
+            'webrick-sharded', 'webrick-fused', 'webrick-generated',
+        ]
+        && $bundledSuite->targetsForRuntime('workerman') === [
+            'infbyte', 'infbyte-full', 'webrick-sharded', 'webrick-fused',
+            'webrick-generated',
+        ],
+        'bundled targets expose only verified integrations for all six runtime profiles',
     );
     $assert(
         $bundledSuite->categories() === [
@@ -1217,11 +1256,14 @@ namespace {
     $assert(
         is_string($workflowSource)
         && str_contains($workflowSource, 'if: failure()')
-        && str_contains($workflowSource, 'docker logs --tail 200 benchmark-frameworks-apache || true')
-        && str_contains($workflowSource, 'docker logs --tail 200 benchmark-frameworks-swoole || true')
-        && str_contains($workflowSource, '--runtime=opcache --output=docs/opcache')
-        && str_contains($workflowSource, '--runtime=swoole --output=docs/swoole'),
-        'the automated workflow runs full separate runtime suites and exposes container errors',
+        && str_contains($workflowSource, 'docker logs --tail 300 ${{ matrix.container }} || true')
+        && substr_count($workflowSource, '- runtime: ') === 6
+        && str_contains($workflowSource, '--runtime=${{ matrix.runtime }}')
+        && str_contains($workflowSource, '--output=docs/${{ matrix.runtime }}')
+        && str_contains($workflowSource, 'actions/upload-artifact@v7')
+        && str_contains($workflowSource, 'actions/download-artifact@v7')
+        && str_contains($workflowSource, 'archive-index --output=docs'),
+        'the automated workflow runs six parallel runtime suites, exposes errors, and merges their archives',
     );
     $assert(
         !is_dir($bundledSuiteDirectory . '/lumen')
@@ -1410,8 +1452,8 @@ namespace {
         && str_contains($dashboard, 'id="category-filter"')
         && str_contains($dashboard, 'aria-label="Open report menu"')
         && str_contains($dashboard, 'aria-label="Report location"')
-        && str_contains($dashboard, 'href="../" aria-label="Back to runtime report history"')
-        && str_contains($dashboard, 'href="../../">All runtime profiles</a>')
+        && str_contains($dashboard, 'href="../" aria-label="Back to benchmark archive"')
+        && str_contains($dashboard, '>Benchmark archive</a>')
         && str_contains($dashboard, '<svg viewBox="0 0 24 24"')
         && !str_contains($dashboard, '>Report menu</button>')
         && str_contains($dashboard, 'Sustainable leaders')
@@ -1468,12 +1510,52 @@ namespace {
     $docsIndex = file_get_contents(dirname(__DIR__) . '/docs/index.html');
     $assert(
         is_string($docsIndex)
-        && str_contains($docsIndex, 'id="runtime"')
-        && str_contains($docsIndex, 'href="opcache/"')
-        && str_contains($docsIndex, 'href="swoole/"')
-        && str_contains($docsIndex, 'same validation, concurrency, repetition, stability, latency, and telemetry procedure'),
-        'the Pages entry point provides a global chooser for separate but methodologically identical runtime reports',
+        && str_contains($docsIndex, 'class="timeline timeline-empty"')
+        && str_contains($docsIndex, '.timeline::before')
+        && str_contains($docsIndex, 'No benchmark reports are available yet')
+        && !str_contains($docsIndex, 'id="runtime"')
+        && str_contains($docsIndex, 'same validation, route, concurrency, repetition, stability, latency, and telemetry procedure'),
+        'the empty Pages entry point provides the combined benchmark history timeline',
     );
+    $combinedHistoryDirectory = sys_get_temp_dir() . '/benchmark-combined-history-' . bin2hex(random_bytes(8));
+    mkdir($combinedHistoryDirectory . '/opcache', 0777, true);
+    file_put_contents($combinedHistoryDirectory . '/opcache/index.html', 'obsolete runtime index');
+    $opcacheHistory = new BenchmarkHistory($combinedHistoryDirectory . '/opcache', 61, true);
+    $swooleHistory = new BenchmarkHistory($combinedHistoryDirectory . '/swoole', 61, true);
+    $opcacheArchive = $opcacheHistory->save([
+        'recordedAt' => '2026-08-01T01:00:00+00:00',
+        'runtimeProfile' => 'opcache',
+        'results' => ['test' => $historyResult],
+    ], '# OPcache');
+    $swooleArchive = $swooleHistory->save([
+        'recordedAt' => '2026-08-01T01:15:00+00:00',
+        'runtimeProfile' => 'swoole',
+        'results' => ['test' => $historyResult],
+    ], '# Swoole');
+    $combinedHistoryIndex = file_get_contents($combinedHistoryDirectory . '/index.html');
+    $combinedDashboard = file_get_contents($opcacheArchive . '/dashboard.html');
+    $assert(
+        is_string($combinedHistoryIndex)
+        && substr_count($combinedHistoryIndex, '<details class="date-card"') === 1
+        && str_contains($combinedHistoryIndex, '2 runtime reports')
+        && str_contains($combinedHistoryIndex, 'class="runtime-option runtime-opcache"')
+        && str_contains($combinedHistoryIndex, 'class="runtime-option runtime-swoole"')
+        && str_contains($combinedHistoryIndex, 'opcache/' . basename($opcacheArchive) . '/dashboard.html')
+        && str_contains($combinedHistoryIndex, 'swoole/' . basename($swooleArchive) . '/dashboard.html')
+        && str_contains($combinedHistoryIndex, 'data-local-date')
+        && str_contains($combinedHistoryIndex, '.date-card::before')
+        && !is_file($combinedHistoryDirectory . '/opcache/index.html')
+        && !is_file($combinedHistoryDirectory . '/swoole/index.html')
+        && is_string($combinedDashboard)
+        && str_contains($combinedDashboard, 'href="../../" aria-label="Back to benchmark archive"'),
+        'runtime histories merge by date into a timeline with direct dashboard choices and a single-level return path',
+    );
+    $opcacheHistory->deleteAll(true);
+    $swooleHistory->deleteAll(true);
+    rmdir($combinedHistoryDirectory . '/opcache');
+    rmdir($combinedHistoryDirectory . '/swoole');
+    unlink($combinedHistoryDirectory . '/index.html');
+    rmdir($combinedHistoryDirectory);
     $expectException(
         RuntimeException::class,
         static fn() => $history->delete(0),
@@ -1501,8 +1583,7 @@ namespace {
         && str_contains($historyIndex, 'July 20, 2026 at 12:30 PM UTC')
         && str_contains($historyIndex, 'prefers-color-scheme:dark')
         && str_contains($historyIndex, 'data-local-time')
-        && str_contains($historyIndex, 'Monthly, reproducible reports')
-        && str_contains($historyIndex, 'href="../" aria-label="Back to all benchmark runtime profiles"'),
+        && str_contains($historyIndex, 'Monthly, reproducible reports'),
         'history index follows the system theme and localizes readable dates for the visitor',
     );
     $deleted = $history->deleteAll(true);

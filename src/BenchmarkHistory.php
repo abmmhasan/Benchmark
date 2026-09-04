@@ -14,6 +14,40 @@ use Throwable;
 /** Stores, lists, compares, renders, and safely removes benchmark run archives. */
 final class BenchmarkHistory
 {
+    /** @var array<string, array{title:string, badge:string, description:string}> */
+    private const RUNTIME_PROFILES = [
+        'opcache' => [
+            'title' => 'OPcache + Apache',
+            'badge' => 'Request per process',
+            'description' => 'Production OPcache with Apache',
+        ],
+        'swoole' => [
+            'title' => 'Swoole',
+            'badge' => 'Persistent worker',
+            'description' => 'Native persistent-worker runtime',
+        ],
+        'fpm' => [
+            'title' => 'PHP-FPM + Nginx',
+            'badge' => 'Request per process',
+            'description' => 'Production OPcache behind Nginx and PHP-FPM',
+        ],
+        'frankenphp' => [
+            'title' => 'FrankenPHP',
+            'badge' => 'Persistent worker',
+            'description' => 'FrankenPHP worker mode',
+        ],
+        'roadrunner' => [
+            'title' => 'RoadRunner',
+            'badge' => 'Persistent worker',
+            'description' => 'RoadRunner PSR-7 workers and Laravel Octane',
+        ],
+        'workerman' => [
+            'title' => 'Workerman',
+            'badge' => 'Event worker',
+            'description' => 'Native Workerman event-loop workers',
+        ],
+    ];
+
     public function __construct(
         private readonly string $root,
         private readonly ?int $maximumEntries = null,
@@ -59,7 +93,10 @@ final class BenchmarkHistory
 
         $this->write($directory . '/results.json', self::encode($payload) . PHP_EOL);
         $this->write($directory . '/report.md', $markdown);
-        $this->write($directory . '/dashboard.html', BenchmarkDashboard::render($payload));
+        $this->write(
+            $directory . '/dashboard.html',
+            BenchmarkDashboard::render($payload, $this->dashboardArchiveUrl()),
+        );
         $this->prune($payload['id'], $recordedAt);
         $this->writeIndex();
 
@@ -179,7 +216,10 @@ final class BenchmarkHistory
     {
         $directory = $this->resolveDirectory($identifier);
         $file = $directory . '/dashboard.html';
-        $this->write($file, BenchmarkDashboard::render($this->load($identifier)));
+        $this->write(
+            $file,
+            BenchmarkDashboard::render($this->load($identifier), $this->dashboardArchiveUrl()),
+        );
         $this->writeIndex();
 
         return $file;
@@ -215,6 +255,20 @@ final class BenchmarkHistory
 
     private function writeIndex(): void
     {
+        if ($this->runtimeProfile() !== null) {
+            $legacyRuntimeIndex = rtrim($this->root, '/') . '/index.html';
+            if (is_file($legacyRuntimeIndex) && !unlink($legacyRuntimeIndex)) {
+                throw new RuntimeException("Unable to remove obsolete runtime index: {$legacyRuntimeIndex}");
+            }
+            $this->writeCombinedIndex(dirname(rtrim($this->root, '/')));
+            return;
+        }
+
+        $this->writeLocalIndex();
+    }
+
+    private function writeLocalIndex(): void
+    {
         $this->ensureRoot();
         $items = '';
         foreach ($this->entries() as $position => $entry) {
@@ -238,16 +292,135 @@ final class BenchmarkHistory
             . "<style>:root{color-scheme:light dark;--page:#f4f7fb;--surface:#fff;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6;--shadow:rgba(30,41,59,.07);--shadow-hover:rgba(30,41,59,.12)}"
             . "@media(prefers-color-scheme:dark){:root{--page:#07111f;--surface:#0e1b2e;--text:#e8eef8;--muted:#98a9bf;--line:#283b55;--primary:#8b8cf8;--shadow:rgba(0,0,0,.24);--shadow-hover:rgba(0,0,0,.34)}}"
             . "*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 0,rgba(91,91,214,.15),transparent 32rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}"
-            . ".shell{width:min(920px,calc(100% - 32px));margin:auto;padding:58px 0}.back-link{display:inline-flex;align-items:center;gap:7px;margin-bottom:24px;color:var(--muted);font-size:13px;font-weight:750;text-decoration:none}.back-link:hover{color:var(--primary)}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}"
+            . ".shell{width:min(920px,calc(100% - 32px));margin:auto;padding:58px 0}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}"
             . "h1{margin:7px 0 8px;font-size:clamp(30px,6vw,48px);letter-spacing:-.04em}.lead{margin:0 0 28px;color:var(--muted)}.runs{display:grid;gap:11px}"
             . ".run-card{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:17px 19px;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 12px 34px var(--shadow);transition:.18s ease}"
             . ".run-card:hover{border-color:var(--primary);color:var(--primary);transform:translateY(-2px);box-shadow:0 18px 42px var(--shadow-hover)}"
             . ".run-meta{display:flex;align-items:center;gap:12px;white-space:nowrap;color:var(--muted)}.run-meta b{color:var(--primary);font-size:20px}.empty{padding:32px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);background:var(--surface)}"
             . "@media(max-width:560px){.shell{padding-top:34px}.run-card{align-items:flex-start;flex-direction:column}.run-meta{width:100%;justify-content:space-between}}</style></head>"
-            . "<body><main class=\"shell\"><a class=\"back-link\" href=\"../\" aria-label=\"Back to all benchmark runtime profiles\">← All runtime profiles</a><div class=\"eyebrow\">Benchmark archive</div><h1>PHP framework performance</h1>"
+            . "<body><main class=\"shell\"><div class=\"eyebrow\">Benchmark archive</div><h1>PHP framework performance</h1>"
             . "<p class=\"lead\">Monthly, reproducible reports generated with validated HTTP responses. Times are shown in your local time zone.</p><div class=\"runs\">{$items}</div></main>"
             . "<script>document.querySelectorAll('time[data-local-time]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(date)})</script></body></html>";
         $this->write(rtrim($this->root, '/') . '/index.html', $html);
+    }
+
+    public static function refreshCombinedIndex(string $archiveRoot): void
+    {
+        (new self($archiveRoot))->writeCombinedIndex($archiveRoot);
+    }
+
+    private function writeCombinedIndex(string $archiveRoot): void
+    {
+        $archiveRoot = rtrim($archiveRoot, '/');
+        if ($archiveRoot === '') {
+            throw new InvalidArgumentException('Combined archive root cannot be empty');
+        }
+        if (!is_dir($archiveRoot) && !mkdir($archiveRoot, 0777, true) && !is_dir($archiveRoot)) {
+            throw new RuntimeException("Unable to create combined archive directory: {$archiveRoot}");
+        }
+
+        /** @var array<string, array{recordedAt:string, timestamp:int, runs:array<string, array{id:string, recordedAt:string, recordedAtDisplay:string, targets:int, path:string}>}> $dates */
+        $dates = [];
+        foreach (self::RUNTIME_PROFILES as $profile => $_metadata) {
+            $runtimeHistory = new self($archiveRoot . '/' . $profile);
+            foreach ($runtimeHistory->entries() as $entry) {
+                $date = self::dateTime($entry['recordedAt']);
+                if ($date === null) {
+                    continue;
+                }
+                $utcDate = $date->setTimezone(new DateTimeZone('UTC'));
+                $key = $utcDate->format('Y-m-d');
+                $timestamp = $utcDate->getTimestamp();
+                $dates[$key] ??= [
+                    'recordedAt' => $entry['recordedAt'],
+                    'timestamp' => $timestamp,
+                    'runs' => [],
+                ];
+                if ($timestamp > $dates[$key]['timestamp']) {
+                    $dates[$key]['recordedAt'] = $entry['recordedAt'];
+                    $dates[$key]['timestamp'] = $timestamp;
+                }
+                $existing = $dates[$key]['runs'][$profile] ?? null;
+                if ($existing === null || $timestamp > (self::dateTime($existing['recordedAt'])?->getTimestamp() ?? 0)) {
+                    $dates[$key]['runs'][$profile] = $entry;
+                }
+            }
+        }
+        uasort($dates, static fn(array $left, array $right): int => $right['timestamp'] <=> $left['timestamp']);
+
+        $cards = '';
+        foreach ($dates as $position => $date) {
+            $recordedAt = self::escape($date['recordedAt']);
+            $fallbackDate = self::dateTime($date['recordedAt'])?->format('F j, Y') ?? $date['recordedAt'];
+            $runtimeCount = count($date['runs']);
+            $runtimeLabel = $runtimeCount === 1 ? '1 runtime report' : "{$runtimeCount} runtime reports";
+            $latest = $position === 0 ? '<span class="latest-badge">Latest</span>' : '';
+            $options = '';
+            foreach (self::RUNTIME_PROFILES as $profile => $metadata) {
+                $entry = $date['runs'][$profile] ?? null;
+                if ($entry === null) {
+                    continue;
+                }
+                $id = self::escape($entry['id']);
+                $time = self::escape($entry['recordedAt']);
+                $timeFallback = self::escape($entry['recordedAtDisplay']);
+                $title = self::escape($metadata['title']);
+                $badge = self::escape($metadata['badge']);
+                $description = self::escape($metadata['description']);
+                $targets = $entry['targets'];
+                $options .= "<a class=\"runtime-option runtime-{$profile}\" href=\"{$profile}/{$id}/dashboard.html\">"
+                    . "<span><span class=\"runtime-badge\">{$badge}</span><strong>{$title}</strong>"
+                    . "<small>{$description} · {$targets} targets · <time datetime=\"{$time}\" data-local-time>{$timeFallback}</time></small></span>"
+                    . '<b aria-hidden="true">→</b></a>';
+            }
+            $open = $position === 0 ? ' open' : '';
+            $cards .= "<details class=\"date-card\"{$open}><summary><span><time datetime=\"{$recordedAt}\" data-local-date>"
+                . self::escape($fallbackDate)
+                . "</time></span><span class=\"date-meta\">{$latest}<span>{$runtimeLabel}</span><b aria-hidden=\"true\"></b></span></summary>"
+                . "<div class=\"runtime-options\">{$options}</div></details>";
+        }
+        $timelineClass = $cards === '' ? 'timeline timeline-empty' : 'timeline';
+        if ($cards === '') {
+            $cards = '<div class="empty">No benchmark reports are available yet. The next benchmark workflow will publish them here.</div>';
+        }
+
+        $html = <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>PHP framework benchmark reports</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+<style>
+:root{color-scheme:light dark;--page:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6;--cyan:#0891b2;--shadow:rgba(30,41,59,.09)}@media(prefers-color-scheme:dark){:root{--page:#07111f;--surface:#0e1b2e;--surface-2:#132238;--text:#e8eef8;--muted:#98a9bf;--line:#283b55;--primary:#8b8cf8;--cyan:#22d3ee;--shadow:rgba(0,0,0,.28)}}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,rgba(91,91,214,.15),transparent 30rem),radial-gradient(circle at 95% 5%,rgba(8,145,178,.12),transparent 26rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}.shell{width:min(980px,calc(100% - 32px));margin:auto;padding:64px 0}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}h1{margin:8px 0;font-size:clamp(34px,6vw,54px);letter-spacing:-.045em}.lead{max-width:760px;margin:0 0 30px;color:var(--muted);font-size:17px}.timeline{display:grid;gap:12px}.date-card{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 16px 44px var(--shadow)}.date-card[open]{border-color:color-mix(in srgb,var(--primary) 55%,var(--line))}.date-card summary{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:19px 21px;cursor:pointer;list-style:none;font-weight:850}.date-card summary::-webkit-details-marker{display:none}.date-meta{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap}.date-meta b{width:10px;height:10px;border-right:2px solid var(--primary);border-bottom:2px solid var(--primary);transform:rotate(45deg);transition:transform .18s}.date-card[open] .date-meta b{transform:rotate(225deg)}.latest-badge,.runtime-badge{display:inline-flex;padding:3px 8px;border-radius:999px;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--primary);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.runtime-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;padding:0 14px 14px;border-top:1px solid var(--line)}.runtime-option{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--text);text-decoration:none;transition:.18s ease}.runtime-option:hover{border-color:var(--primary);color:var(--text);transform:translateY(-2px)}.runtime-option>span{display:grid;justify-items:start;gap:5px}.runtime-option strong{font-size:17px}.runtime-option small{color:var(--muted)}.runtime-option b{color:var(--primary);font-size:20px}.runtime-swoole .runtime-badge,.runtime-swoole b{color:var(--cyan)}.runtime-swoole .runtime-badge{background:color-mix(in srgb,var(--cyan) 14%,transparent)}.runtime-swoole:hover{border-color:var(--cyan)}.empty{padding:34px;border:1px dashed var(--line);border-radius:16px;background:var(--surface);color:var(--muted);text-align:center}@media(max-width:680px){.shell{padding:38px 0}.date-card summary{align-items:flex-start;flex-direction:column;gap:9px}.date-meta{width:100%;white-space:normal}.date-meta b{margin-left:auto}.runtime-options{grid-template-columns:1fr}}
+.timeline{position:relative;padding-left:34px}.timeline::before{content:"";position:absolute;top:27px;bottom:27px;left:9px;width:2px;border-radius:999px;background:linear-gradient(var(--primary),color-mix(in srgb,var(--cyan) 50%,var(--line)),var(--line))}.timeline-empty{padding-left:0}.timeline-empty::before{display:none}.date-card{position:relative;overflow:visible}.date-card::before{content:"";position:absolute;z-index:2;top:23px;left:-31px;width:14px;height:14px;border:3px solid var(--page);border-radius:50%;background:var(--line);box-shadow:0 0 0 2px var(--line)}.date-card[open]::before{background:var(--primary);box-shadow:0 0 0 2px var(--primary),0 0 0 7px color-mix(in srgb,var(--primary) 12%,transparent)}.date-card:first-child::before{background:var(--cyan);box-shadow:0 0 0 2px var(--cyan),0 0 0 7px color-mix(in srgb,var(--cyan) 14%,transparent)}@media(max-width:680px){.timeline:not(.timeline-empty){padding-left:26px}.timeline::before{left:6px}.date-card::before{left:-26px}}
+</style>
+</head>
+<body>
+<main class="shell"><div class="eyebrow">Benchmark report archive</div><h1>PHP framework performance</h1><p class="lead">Browse reports along the benchmark timeline, expand a date, then choose the execution model you want to inspect. Every runtime uses the same validation, route, concurrency, repetition, stability, latency, and telemetry procedure.</p><div class="{$timelineClass}">{$cards}</div></main>
+<script>document.querySelectorAll('time[data-local-date]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric'}).format(date)});document.querySelectorAll('time[data-local-time]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(date)})</script>
+</body>
+</html>
+HTML;
+        $this->write($archiveRoot . '/index.html', $html);
+    }
+
+    private function runtimeProfile(): ?string
+    {
+        $profile = basename(rtrim($this->root, '/'));
+        return array_key_exists($profile, self::RUNTIME_PROFILES) ? $profile : null;
+    }
+
+    private function dashboardArchiveUrl(): string
+    {
+        return $this->runtimeProfile() === null ? '../' : '../../';
+    }
+
+    private static function escape(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
     private function prune(string $currentId, DateTimeImmutable $recordedAt): void

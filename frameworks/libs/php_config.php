@@ -15,6 +15,7 @@ if ($benchmarkProfile === null && is_file($profileFile)) {
     $storedProfile = trim((string) file_get_contents($profileFile));
     $benchmarkProfile = $storedProfile === '' ? null : $storedProfile;
 }
+$runtimeProfile = str_starts_with((string) $benchmarkProfile, 'fpm') ? 'fpm' : 'opcache';
 
 header('Content-Type: application/json; charset=utf-8');
 echo json_encode([
@@ -23,7 +24,7 @@ echo json_encode([
     'loadedIni' => php_ini_loaded_file() ?: null,
     'benchmarkProfile' => $benchmarkProfile,
     'runtime' => [
-        'profile' => 'opcache',
+        'profile' => $runtimeProfile,
         'extensionLoaded' => false,
         'extensionVersion' => null,
         'persistentWorker' => false,

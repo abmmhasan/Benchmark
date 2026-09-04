@@ -437,8 +437,14 @@ optimize_production() {
 
 install_persistent_runtime_adapter() {
     case "$target" in
+        infbyte|infbyte-full|webrick-sharded|webrick-fused|webrick-generated)
+            composer --working-dir="$asset_dir" require \
+                nyholm/psr7 spiral/roadrunner-http workerman/workerman \
+                --prefer-dist --no-interaction --update-no-dev --classmap-authoritative \
+                --no-progress --with-all-dependencies
+            ;;
         laravel|laravel-api)
-            composer --working-dir="$asset_dir" require laravel/octane \
+            composer --working-dir="$asset_dir" require laravel/octane spiral/roadrunner-http \
                 --prefer-dist --no-interaction --update-no-dev --classmap-authoritative \
                 --no-progress --with-all-dependencies --ignore-platform-req=ext-swoole
             ;;

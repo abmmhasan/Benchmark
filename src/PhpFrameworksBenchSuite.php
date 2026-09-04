@@ -11,6 +11,16 @@ use RuntimeException;
 /** Adapts a framework fixture suite to validated BenchmarkConfig targets. */
 final class PhpFrameworksBenchSuite
 {
+    /** @var list<string> */
+    public const RUNTIME_PROFILES = [
+        'opcache',
+        'fpm',
+        'swoole',
+        'frankenphp',
+        'roadrunner',
+        'workerman',
+    ];
+
     private readonly string $projectDirectory;
     private readonly string $baseUrl;
     private readonly string $config;
@@ -103,8 +113,9 @@ final class PhpFrameworksBenchSuite
     {
         $runtimes = $this->classifications('framework_runtimes', $targets);
         foreach ($runtimes as $target => $runtime) {
-            if (!in_array($runtime, ['opcache', 'swoole', 'both'], true)) {
-                throw new RuntimeException("Missing opcache/swoole/both framework_runtimes definition for target: {$target}");
+            $profiles = $runtime === 'both' ? ['opcache', 'swoole'] : explode('-', $runtime);
+            if ($profiles === [] || array_diff($profiles, self::RUNTIME_PROFILES) !== []) {
+                throw new RuntimeException("Invalid framework_runtimes definition for target: {$target}");
             }
         }
 
@@ -114,13 +125,15 @@ final class PhpFrameworksBenchSuite
     /** @return list<string> */
     public function targetsForRuntime(string $runtime): array
     {
-        if (!in_array($runtime, ['opcache', 'swoole'], true)) {
+        if (!in_array($runtime, self::RUNTIME_PROFILES, true)) {
             throw new InvalidArgumentException("Unknown benchmark runtime: {$runtime}");
         }
 
         return array_keys(array_filter(
             $this->runtimes(),
-            static fn(string $targetRuntime): bool => $targetRuntime === $runtime || $targetRuntime === 'both',
+            static fn(string $targetRuntime): bool => $targetRuntime === 'both'
+                ? in_array($runtime, ['opcache', 'swoole'], true)
+                : in_array($runtime, explode('-', $targetRuntime), true),
         ));
     }
 
