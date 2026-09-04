@@ -56,7 +56,7 @@ Every generated application that uses Composer is installed with `--no-dev` and
 an authoritative classmap. The lifecycle applies a predefined production
 environment for each framework before running its supported cache/optimization
 commands.
-Both Docker runtimes use `php.ini-production` and disable displayed errors. The
+All Docker runtimes use `php.ini-production` and disable displayed errors. The
 `opcache` profile runs request-per-process applications on Apache with OPcache
 enabled. The `swoole` profile runs persistent workers with CLI OPcache disabled.
 Framework environment variables remain target-specific, and every report records
@@ -83,41 +83,29 @@ sharded target loads Webrick's directory-based cache, the fused target loads
 its compact single-file cache, and the generated target loads its generated
 matcher code. Their results therefore isolate the matcher strategy.
 
-Hyperf is Swoole-only. `infbyte`, `infbyte-full`, `webrick-sharded`,
-`webrick-fused`, `webrick-generated`, `laravel`, `laravel-api`, and `symfony` run
-in both result sets.
-InfByte and Webrick use their native Swoole emitter, Laravel uses Octane, and
-Symfony uses its Swoole Runtime adapter. Other request-per-process targets are
-not relabeled as Swoole applications without a compatible adapter. Both profiles
-run the same validation, concurrency curve, repetition, stability, latency,
-error, and remote-telemetry procedure.
+Six separate runtime profiles are published: OPcache + Apache, PHP-FPM + Nginx,
+Swoole, FrankenPHP worker mode, RoadRunner, and Workerman. Hyperf remains
+Swoole-only. InfByte, InfByte Full, and all three Webrick matchers have dedicated
+integrations in every profile. Laravel uses Octane for Swoole, FrankenPHP, and
+RoadRunner. A target is included only when `frameworks/config` declares a real
+integration for that runtime. Every profile runs the same validation, routes,
+concurrency curve, repetition, stability, latency, error, and telemetry procedure.
 
 ### Run all targets
 
-Omitting `--target` selects every framework assigned to `--runtime`. The default
-runtime is `opcache`; use `--runtime=swoole` for the persistent-worker result set.
+Omitting `--target` selects every compatible target assigned to `--runtime`.
+The default is `opcache`; the other values are `fpm`, `swoole`, `frankenphp`,
+`roadrunner`, and `workerman`.
 
 #### Generate
 
 ```bash
-# Create the latest compatible stable applications for both result sets.
-composer benchmark:frameworks -- setup --runtime=opcache --force
-composer benchmark:frameworks -- setup --runtime=swoole --force
-
-# Later, recreate every application from the latest compatible release.
-composer benchmark:frameworks -- update --runtime=opcache --force
-composer benchmark:frameworks -- update --runtime=swoole --force
-
-# Run the complete OPcache + Apache result set.
-composer benchmark:frameworks -- docker --runtime=opcache
-composer benchmark:frameworks -- check --runtime=opcache
-composer benchmark:frameworks -- run --runtime=opcache --output=.benchmark-output/opcache
-composer benchmark:frameworks -- docker-stop
-
-# Run the same complete test procedure under Swoole.
-composer benchmark:frameworks -- docker --runtime=swoole
-composer benchmark:frameworks -- check --runtime=swoole
-composer benchmark:frameworks -- run --runtime=swoole --output=.benchmark-output/swoole
+# Replace RUNTIME with opcache, fpm, swoole, frankenphp, roadrunner, or workerman.
+RUNTIME=opcache
+composer benchmark:frameworks -- setup --runtime="$RUNTIME" --force
+composer benchmark:frameworks -- docker --runtime="$RUNTIME"
+composer benchmark:frameworks -- check --runtime="$RUNTIME"
+composer benchmark:frameworks -- run --runtime="$RUNTIME" --output=".benchmark-output/$RUNTIME"
 composer benchmark:frameworks -- docker-stop
 ```
 
@@ -125,10 +113,9 @@ composer benchmark:frameworks -- docker-stop
 
 ```bash
 # List archived runs and regenerate the newest visual dashboard.
-composer benchmark:frameworks -- list --output=.benchmark-output/opcache
-composer benchmark:frameworks -- dashboard --run=0 --output=.benchmark-output/opcache
-composer benchmark:frameworks -- list --output=.benchmark-output/swoole
-composer benchmark:frameworks -- dashboard --run=0 --output=.benchmark-output/swoole
+RUNTIME=opcache
+composer benchmark:frameworks -- list --output=".benchmark-output/$RUNTIME"
+composer benchmark:frameworks -- dashboard --run=0 --output=".benchmark-output/$RUNTIME"
 ```
 
 #### Clean
@@ -138,8 +125,8 @@ composer benchmark:frameworks -- dashboard --run=0 --output=.benchmark-output/sw
 composer benchmark:frameworks -- docker-stop
 
 # Remove generated applications while preserving benchmark scripts.
-composer benchmark:frameworks -- clean --runtime=opcache --force
-composer benchmark:frameworks -- clean --runtime=swoole --force
+RUNTIME=opcache
+composer benchmark:frameworks -- clean --runtime="$RUNTIME" --force
 ```
 
 ### Manual targets
@@ -209,9 +196,10 @@ metadata and displayed beside framework names in the dashboard.
 The `Framework benchmarks` GitHub Actions workflow runs on day 1 of every month,
 after non-docs changes land on `main`, or manually. It uses a 10% RPM stability
 threshold and opens or updates a pull request containing the generated `docs/`
-reports into separate `docs/opcache/` and `docs/swoole/` histories instead of
-committing directly to `main`. The root `docs/index.html` provides a global
-runtime chooser. After the results PR is
+reports into a separate history directory for each runtime profile instead of
+committing directly to `main`. The root `docs/index.html` merges both histories
+into a collapsible date timeline; expanding a date shows the available runtime
+reports and links directly to their dashboards. After the results PR is
 reviewed and merged, the separate `Benchmark Pages` workflow deploys `docs/` to
 GitHub Pages. Set the repository's Pages source to **GitHub Actions** and enable
 **Allow GitHub Actions to create and approve pull requests** in the repository
@@ -262,8 +250,8 @@ composer benchmark:frameworks -- docker-stop
 
 `disable-fastcgi` reads the web server's loaded `php.ini`, creates a
 `.benchmark.bak` backup, and requires appropriate local filesystem permissions.
-Restart PHP-FPM afterward. Docker mode builds either the Apache/OPcache or Swoole
-image, mounts `frameworks/`, and starts a named container in the background. By
+Restart PHP-FPM afterward. Docker mode builds the selected runtime image, mounts
+`frameworks/`, and starts a named container in the background. By
 default Docker publishes the selected server on an available ephemeral loopback
 port and records the resulting base URL in the ignored
 `frameworks/.benchmark-server.json` file. Later `doctor`, `check`, and `run`

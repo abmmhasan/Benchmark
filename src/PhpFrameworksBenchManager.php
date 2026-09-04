@@ -416,6 +416,94 @@ final class PhpFrameworksBenchManager
         );
     }
 
+    /** @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}> */
+    public function dockerFpm(
+        ?int $port = null,
+        string $name = 'benchmark-frameworks-fpm',
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return $this->dockerContainer(
+            runtime: 'fpm',
+            port: $port,
+            name: $name,
+            dockerfileName: 'fpm.dockerfile',
+            image: 'benchmark/php-frameworks-fpm',
+            containerPort: 8080,
+            volumeTarget: '/var/www/html/frameworks',
+            basePath: '/frameworks',
+            runAsHostUser: false,
+            dryRun: $dryRun,
+            output: $output,
+        );
+    }
+
+    /** @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}> */
+    public function dockerFrankenPhp(
+        ?int $port = null,
+        string $name = 'benchmark-frameworks-frankenphp',
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return $this->dockerContainer(
+            runtime: 'frankenphp',
+            port: $port,
+            name: $name,
+            dockerfileName: 'frankenphp.dockerfile',
+            image: 'benchmark/php-frameworks-frankenphp',
+            containerPort: 9500,
+            volumeTarget: '/app/frameworks',
+            basePath: '',
+            runAsHostUser: false,
+            dryRun: $dryRun,
+            output: $output,
+        );
+    }
+
+    /** @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}> */
+    public function dockerRoadRunner(
+        ?int $port = null,
+        string $name = 'benchmark-frameworks-roadrunner',
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return $this->dockerContainer(
+            runtime: 'roadrunner',
+            port: $port,
+            name: $name,
+            dockerfileName: 'roadrunner.dockerfile',
+            image: 'benchmark/php-frameworks-roadrunner',
+            containerPort: 9500,
+            volumeTarget: '/app/frameworks',
+            basePath: '',
+            runAsHostUser: true,
+            dryRun: $dryRun,
+            output: $output,
+        );
+    }
+
+    /** @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}> */
+    public function dockerWorkerman(
+        ?int $port = null,
+        string $name = 'benchmark-frameworks-workerman',
+        bool $dryRun = false,
+        ?callable $output = null,
+    ): array {
+        return $this->dockerContainer(
+            runtime: 'workerman',
+            port: $port,
+            name: $name,
+            dockerfileName: 'workerman.dockerfile',
+            image: 'benchmark/php-frameworks-workerman',
+            containerPort: 9500,
+            volumeTarget: '/app/frameworks',
+            basePath: '',
+            runAsHostUser: true,
+            dryRun: $dryRun,
+            output: $output,
+        );
+    }
+
     /**
      * @return list<array{command:list<string>, cwd:string, status:string, exitCode?:int, stdout?:string, stderr?:string}>
      */
@@ -436,6 +524,30 @@ final class PhpFrameworksBenchManager
             'swoole' => $this->dockerSwoole(
                 $port,
                 $name ?? 'benchmark-frameworks-swoole',
+                $dryRun,
+                $output,
+            ),
+            'fpm' => $this->dockerFpm(
+                $port,
+                $name ?? 'benchmark-frameworks-fpm',
+                $dryRun,
+                $output,
+            ),
+            'frankenphp' => $this->dockerFrankenPhp(
+                $port,
+                $name ?? 'benchmark-frameworks-frankenphp',
+                $dryRun,
+                $output,
+            ),
+            'roadrunner' => $this->dockerRoadRunner(
+                $port,
+                $name ?? 'benchmark-frameworks-roadrunner',
+                $dryRun,
+                $output,
+            ),
+            'workerman' => $this->dockerWorkerman(
+                $port,
+                $name ?? 'benchmark-frameworks-workerman',
                 $dryRun,
                 $output,
             ),

@@ -31,29 +31,29 @@ webrick-generated
 yii-basic
 "
 
-# Supported execution models. "both" targets are benchmarked in each separately
-# published profile: Apache with OPcache and native persistent Swoole workers.
+# Supported execution models. A hyphen-separated value lists every profile in
+# which the target has a dedicated, production-mode server integration.
 framework_runtimes="
-cakephp:opcache
-codeigniter:opcache
-fatfree:opcache
-fast-route:opcache
-flight:opcache
+cakephp:opcache-fpm
+codeigniter:opcache-fpm
+fatfree:opcache-fpm
+fast-route:opcache-fpm
+flight:opcache-fpm
 hyperf:swoole
-infbyte:both
-infbyte-full:both
-kumbia:opcache
-laravel:both
-laravel-api:both
-leaf:opcache
-nette:opcache
-pure-php:opcache
-slim:opcache
-symfony:both
-webrick-sharded:both
-webrick-fused:both
-webrick-generated:both
-yii-basic:opcache
+infbyte:opcache-fpm-swoole-frankenphp-roadrunner-workerman
+infbyte-full:opcache-fpm-swoole-frankenphp-roadrunner-workerman
+kumbia:opcache-fpm
+laravel:opcache-fpm-swoole-frankenphp-roadrunner
+laravel-api:opcache-fpm-swoole-frankenphp-roadrunner
+leaf:opcache-fpm
+nette:opcache-fpm
+pure-php:opcache-fpm
+slim:opcache-fpm
+symfony:opcache-fpm-swoole
+webrick-sharded:opcache-fpm-swoole-frankenphp-roadrunner-workerman
+webrick-fused:opcache-fpm-swoole-frankenphp-roadrunner-workerman
+webrick-generated:opcache-fpm-swoole-frankenphp-roadrunner-workerman
+yii-basic:opcache-fpm
 "
 
 # Dashboard categories. Pure PHP is a reference baseline, not a framework.
