@@ -311,11 +311,11 @@ as eight separate benchmark candidates.
 
 With two or three repetitions, a concurrency level is stable only when its RPM
 spread is within `stabilityThreshold()` (5% by default). Unstable levels remain in
-the report, but only the fastest stable level contributes to the sustainable
-ranking. The summary also reports each target's fastest observed median and its
-stability independently. A target with no stable level therefore keeps its peak
-visible without receiving a sustainable rank. One-repetition results are
-explicitly marked unverified and are not treated as stable.
+the report. The fastest stable level is used as a target's ranked RPM when one
+exists; otherwise its fastest observed level remains ranked and is explicitly
+flagged `unstable`. The summary also reports each target's fastest observed
+median and its stability independently. One-repetition results remain ranked but
+are explicitly marked `unverified` rather than being treated as stable.
 
 Route scenarios default to automatic warm-up only for GET and HEAD. A known
 non-mutating scenario can explicitly opt in; the suite does this for its POST
@@ -362,12 +362,12 @@ $markdown = $runner->formatResults($results, 'table');
 $json = $runner->formatResults($results, 'json');
 ```
 
-The first table is a sustainable ranking rather than a peak-throughput ranking.
-It shows the best stable RPM and concurrency beside the peak observed RPM,
-concurrency, and stability. Stable targets are ranked first by sustainable RPM;
-targets with only unstable or unverified measurements remain unranked and follow
-in peak-RPM order. Compare targets at the same concurrency in the detailed tables
-when capacity curves differ.
+The first table is the overall ranking. It shows the selected ranked RPM,
+concurrency, and stability beside the peak observed RPM, concurrency, and
+stability. Every validated target receives a rank; unstable and unverified
+measurements carry a visible warning so they are not mistaken for sustainable
+results. Compare targets at the same concurrency in the detailed tables when
+capacity curves differ.
 
 Each throughput table includes the individual run RPM values, total spread, and
 stability decision so an outlier cannot be hidden by the median.
@@ -397,7 +397,7 @@ $config = new BenchmarkConfig(
 
 Results include:
 
-- best stable RPM, fastest observed RPM, and their concurrency levels;
+- ranked RPM, ranking stability, fastest observed RPM, and their concurrency levels;
 - attempted and successful request counts;
 - transfer, timeout, status, and response-validation failures;
 - p50, p95, and p99 successful-response latency;

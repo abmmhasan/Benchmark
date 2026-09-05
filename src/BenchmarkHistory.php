@@ -185,7 +185,7 @@ final class BenchmarkHistory
             $now = $currentResults[$target];
             $before = $baselineResults[$target];
             foreach ([
-                'Stable RPM' => [$now['stable']['req_per_min'] ?? null, $before['stable']['req_per_min'] ?? null],
+                'Ranked RPM' => [$now['multiple']['req_per_min'] ?? null, $before['multiple']['req_per_min'] ?? null],
                 'Peak RPM' => [$now['peak']['req_per_min'] ?? null, $before['peak']['req_per_min'] ?? null],
                 'p50 ms' => [self::milliseconds($now['multiple']['p50'] ?? null), self::milliseconds($before['multiple']['p50'] ?? null)],
                 'p99 ms' => [self::milliseconds($now['multiple']['p99'] ?? null), self::milliseconds($before['multiple']['p99'] ?? null)],
@@ -562,7 +562,7 @@ JS;
                     default => 'Unknown',
                 };
                 $componentOptions[$componentBased] = $componentLabel;
-                $stableRpm = self::numeric($result['stable']['req_per_min'] ?? null);
+                $rankedRpm = self::numeric($result['multiple']['req_per_min'] ?? null);
                 $peakRpm = self::numeric($result['peak']['req_per_min'] ?? null);
                 $rank = self::numeric($result['rank'] ?? null);
                 $peakConcurrency = self::numeric($result['peak']['concurrency'] ?? null);
@@ -572,8 +572,9 @@ JS;
                 $serverMs = self::remoteMetric($result, 'server_execution_ms');
                 $files = self::remoteMetric($result, 'included_files');
                 $rankingStatus = is_string($result['rankingStatus'] ?? null)
-                    ? ucfirst(str_replace('-', ' ', $result['rankingStatus']))
-                    : 'Unavailable';
+                    ? strtolower($result['rankingStatus'])
+                    : 'unavailable';
+                $rankingStatusLabel = ucfirst(str_replace('-', ' ', $rankingStatus));
                 $failedRequests = self::numeric($result['multiple']['failed_requests'] ?? null) ?? 0.0;
                 $errorRate = self::percent($result['multiple']['error_rate'] ?? null) ?? 0.0;
                 $version = is_string($versions[$target] ?? null) ? trim($versions[$target]) : '';
@@ -590,7 +591,8 @@ JS;
                     'componentBased' => $componentBased,
                     'componentLabel' => $componentLabel,
                     'rank' => $rank,
-                    'stableRpm' => $stableRpm,
+                    'rankedRpm' => $rankedRpm,
+                    'rankingStatus' => $rankingStatus,
                     'peakRpm' => $peakRpm,
                     'peakConcurrency' => $peakConcurrency,
                     'p50' => $p50,
@@ -600,7 +602,7 @@ JS;
                     'files' => $files,
                     'diagnostic' => sprintf(
                         'Status: %s · Failed requests: %s · Error rate: %.3f%%',
-                        $rankingStatus,
+                        $rankingStatusLabel,
                         number_format($failedRequests, 0, '.', ','),
                         $errorRate,
                     ),
@@ -608,8 +610,8 @@ JS;
             }
         }
         usort($rows, static function (array $left, array $right): int {
-            $leftRpm = $left['stableRpm'] ?? -INF;
-            $rightRpm = $right['stableRpm'] ?? -INF;
+            $leftRpm = $left['rankedRpm'] ?? -INF;
+            $rightRpm = $right['rankedRpm'] ?? -INF;
             $byRpm = $rightRpm <=> $leftRpm;
             return $byRpm !== 0
                 ? $byRpm
@@ -642,7 +644,7 @@ JS;
                 . '<td data-sort="' . self::escape(strtolower($row['system'])) . '"><a class="system-link" href="'
                 . self::escape($row['href']) . '">' . self::escape($row['system']) . '</a></td>'
                 . self::combinedNumericCell($row['rank'], 0)
-                . self::combinedNumericCell($row['stableRpm'], 0)
+                . self::combinedRankedRpmCell($row['rankedRpm'], $row['rankingStatus'])
                 . self::combinedNumericCell($row['peakRpm'], 0)
                 . self::combinedNumericCell($row['peakConcurrency'], 0)
                 . self::combinedNumericCell($row['p50'], 2)
@@ -681,7 +683,7 @@ JS;
             . '<button type="button" class="reset-filters" data-reset-results>Clear</button></div>'
             . '<div class="combined-table-wrap"><table class="combined-table" data-combined-table><thead><tr>'
             . self::combinedHeader('Target', 'string') . self::combinedHeader('System', 'string')
-            . self::combinedHeader('Overall rank', 'number') . self::combinedHeader('Stable RPM', 'number')
+            . self::combinedHeader('Overall rank', 'number') . self::combinedHeader('Ranked RPM', 'number')
             . self::combinedHeader('Peak RPM', 'number') . self::combinedHeader('Peak c', 'number')
             . self::combinedHeader('p50 ms', 'number') . self::combinedHeader('p99 ms', 'number')
             . self::combinedHeader('Memory MB', 'number') . self::combinedHeader('Server ms', 'number')
@@ -714,6 +716,21 @@ JS;
         }
         return '<td data-sort="' . self::escape((string) $numeric) . '">'
             . number_format($numeric, $decimals, '.', ',') . '</td>';
+    }
+
+    private static function combinedRankedRpmCell(mixed $value, string $rankingStatus): string
+    {
+        $numeric = self::numeric($value);
+        if ($numeric === null) {
+            return '<td data-sort="">—</td>';
+        }
+        $flag = $rankingStatus === 'stable'
+            ? ''
+            : ' <span class="result-version" title="Ranked result with a stability warning">'
+                . self::escape(ucfirst(str_replace('-', ' ', $rankingStatus))) . '</span>';
+
+        return '<td data-sort="' . self::escape((string) $numeric) . '">'
+            . number_format($numeric, 0, '.', ',') . $flag . '</td>';
     }
 
     private static function numeric(mixed $value): ?float
