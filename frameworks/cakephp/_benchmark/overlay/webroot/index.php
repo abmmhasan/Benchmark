@@ -33,12 +33,12 @@ use Cake\Http\Server;
 // Bind your application to the server.
 $server = new Server(new Application(dirname(__DIR__) . '/config'));
 
-// Run the request/response through the application and emit the response.
-$server->emit($server->run());
-
-/* *** PHP-Frameworks-Bench *** */
-// check out the HelloWorldController.php
-// for php-fpm:
-// comment this line and uncomment it in HelloWorldController.php
-// make sure to run sudo bash disable-fastcgi.sh
-require dirname(__DIR__, 3) . '/libs/output_data.php';
+// Append telemetry before FastCGI can finalize the response, then emit it.
+$response = $server->run();
+$telemetry = sprintf(
+    "\n%' 8d:%f:%'.03d",
+    memory_get_peak_usage(),
+    microtime(true) - (float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true)),
+    max(0, count(get_included_files()) - 1),
+);
+$server->emit($response->withStringBody((string) $response->getBody() . $telemetry));

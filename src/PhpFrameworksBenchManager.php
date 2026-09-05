@@ -476,7 +476,7 @@ final class PhpFrameworksBenchManager
             containerPort: 9500,
             volumeTarget: '/app/frameworks',
             basePath: '',
-            runAsHostUser: true,
+            runAsHostUser: false,
             dryRun: $dryRun,
             output: $output,
         );
@@ -498,7 +498,7 @@ final class PhpFrameworksBenchManager
             containerPort: 9500,
             volumeTarget: '/app/frameworks',
             basePath: '',
-            runAsHostUser: true,
+            runAsHostUser: false,
             dryRun: $dryRun,
             output: $output,
         );
@@ -588,7 +588,7 @@ final class PhpFrameworksBenchManager
             ? "127.0.0.1::{$containerPort}"
             : "127.0.0.1:{$port}:{$containerPort}";
         $runCommand = [
-            'docker', 'run', '--detach', '--rm', '--name', $name,
+            'docker', 'run', '--detach', '--name', $name,
         ];
         if ($runAsHostUser && function_exists('posix_geteuid') && function_exists('posix_getegid')) {
             $runCommand[] = '--user';
@@ -699,7 +699,7 @@ final class PhpFrameworksBenchManager
             throw new InvalidArgumentException('Invalid Docker container name');
         }
 
-        $command = ['docker', 'stop', $name];
+        $command = ['docker', 'rm', '--force', $name];
         if ($dryRun) {
             return [
                 'command' => $command,

@@ -7,34 +7,54 @@
 :9502 {
     root * /app/frameworks/infbyte/asset/public
     php_server {
-        worker /app/frameworks/infbyte/asset/benchmark-worker.php {$BENCHMARK_WORKERS}
+        worker {
+            file /app/frameworks/infbyte/asset/benchmark-worker.php
+            num {$BENCHMARK_WORKERS}
+            match /*
+        }
     }
 }
 
 :9503 {
     root * /app/frameworks/infbyte-full/asset/public
     php_server {
-        worker /app/frameworks/infbyte-full/asset/benchmark-worker.php {$BENCHMARK_WORKERS}
+        worker {
+            file /app/frameworks/infbyte-full/asset/benchmark-worker.php
+            num {$BENCHMARK_WORKERS}
+            match /*
+        }
     }
 }
 
 :9504 {
     root * /app/frameworks/webrick-sharded/asset/public
     php_server {
-        worker /app/frameworks/webrick-sharded/asset/benchmark-worker.php {$BENCHMARK_WORKERS}
+        worker {
+            file /app/frameworks/webrick-sharded/asset/benchmark-worker.php
+            num {$BENCHMARK_WORKERS}
+            match /*
+        }
     }
 }
 
 :9505 {
     root * /app/frameworks/webrick-fused/asset/public
     php_server {
-        worker /app/frameworks/webrick-fused/asset/benchmark-worker.php {$BENCHMARK_WORKERS}
+        worker {
+            file /app/frameworks/webrick-fused/asset/benchmark-worker.php
+            num {$BENCHMARK_WORKERS}
+            match /*
+        }
     }
 }
 
 :9509 {
     root * /app/frameworks/webrick-generated/asset/public
     php_server {
-        worker /app/frameworks/webrick-generated/asset/benchmark-worker.php {$BENCHMARK_WORKERS}
+        worker {
+            file /app/frameworks/webrick-generated/asset/benchmark-worker.php
+            num {$BENCHMARK_WORKERS}
+            match /*
+        }
     }
 }

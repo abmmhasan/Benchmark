@@ -72,7 +72,12 @@ if ($driver === 'roadrunner') {
                 method: $incoming->getMethod(),
                 uri: (string) $incoming->getUri(),
             );
-            $worker->respond($handle($request));
+            $response = $handle($request);
+            $worker->respond(new Nyholm\Psr7\Response(
+                $response->getStatusCode(),
+                $response->getHeaders(),
+                (string) $response->getBody(),
+            ));
         } catch (Throwable $exception) {
             $worker->getWorker()->error((string) $exception);
         }
@@ -90,7 +95,13 @@ if ($driver === 'workerman') {
     $server->reusePort = true;
     $server->onMessage = static function ($connection, Workerman\Protocols\Http\Request $incoming) use ($handle): void {
         try {
-            $response = $handle(Request::fake(method: $incoming->method(), uri: $incoming->uri()));
+            $response = $handle(Request::fake(
+                query: $incoming->get(),
+                post: $incoming->post(),
+                headers: $incoming->header(),
+                method: $incoming->method(),
+                uri: 'http://127.0.0.1' . $incoming->uri(),
+            ));
             $connection->send(new Workerman\Protocols\Http\Response(
                 $response->getStatusCode(),
                 $response->getHeaders(),
