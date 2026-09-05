@@ -347,6 +347,7 @@ final class BenchmarkHistory
             }
         }
         uasort($dates, static fn(array $left, array $right): int => $right['timestamp'] <=> $left['timestamp']);
+        $this->syncCombinedResultPages($archiveRoot, $dates);
 
         $cards = '';
         $datePosition = 0;
@@ -374,12 +375,17 @@ final class BenchmarkHistory
                     . "<small>{$description} · {$targets} targets · <time datetime=\"{$time}\" data-local-time>{$timeFallback}</time></small></span>"
                     . '<b aria-hidden="true">→</b></a>';
             }
-            $combinedResults = self::combinedResultsSection($date['runs'], $dateKey);
+            $resultCount = array_sum(array_column($date['runs'], 'targets'));
+            $combinedLink = '<a class="combined-option" href="combined/' . self::escape($dateKey) . '/index.html">'
+                . '<span><span class="runtime-badge">All systems</span><strong>Compare framework results</strong>'
+                . '<small>' . number_format($resultCount) . ' results across ' . $runtimeCount
+                . ($runtimeCount === 1 ? ' runtime system' : ' runtime systems') . '</small></span>'
+                . '<b aria-hidden="true">→</b></a>';
             $open = $datePosition === 0 ? ' open' : '';
             $cards .= "<details class=\"date-card\"{$open}><summary><span><time datetime=\"{$recordedAt}\" data-local-date>"
                 . self::escape($fallbackDate)
                 . "</time></span><span class=\"date-meta\">{$latest}<span>{$runtimeLabel}</span><b aria-hidden=\"true\"></b></span></summary>"
-                . "<div class=\"runtime-options\">{$options}</div>{$combinedResults}</details>";
+                . "<div class=\"runtime-options\">{$options}</div><div class=\"combined-option-wrap\">{$combinedLink}</div></details>";
             ++$datePosition;
         }
         $timelineClass = $cards === '' ? 'timeline timeline-empty' : 'timeline';
@@ -399,7 +405,7 @@ final class BenchmarkHistory
 <style>
 :root{color-scheme:light dark;--page:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6;--cyan:#0891b2;--shadow:rgba(30,41,59,.09)}@media(prefers-color-scheme:dark){:root{--page:#07111f;--surface:#0e1b2e;--surface-2:#132238;--text:#e8eef8;--muted:#98a9bf;--line:#283b55;--primary:#8b8cf8;--cyan:#22d3ee;--shadow:rgba(0,0,0,.28)}}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,rgba(91,91,214,.15),transparent 30rem),radial-gradient(circle at 95% 5%,rgba(8,145,178,.12),transparent 26rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}.shell{width:min(980px,calc(100% - 32px));margin:auto;padding:64px 0}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}h1{margin:8px 0;font-size:clamp(34px,6vw,54px);letter-spacing:-.045em}.lead{max-width:760px;margin:0 0 30px;color:var(--muted);font-size:17px}.timeline{display:grid;gap:12px}.date-card{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 16px 44px var(--shadow)}.date-card[open]{border-color:color-mix(in srgb,var(--primary) 55%,var(--line))}.date-card summary{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:19px 21px;cursor:pointer;list-style:none;font-weight:850}.date-card summary::-webkit-details-marker{display:none}.date-meta{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap}.date-meta b{width:10px;height:10px;border-right:2px solid var(--primary);border-bottom:2px solid var(--primary);transform:rotate(45deg);transition:transform .18s}.date-card[open] .date-meta b{transform:rotate(225deg)}.latest-badge,.runtime-badge{display:inline-flex;padding:3px 8px;border-radius:999px;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--primary);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.runtime-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;padding:0 14px 14px;border-top:1px solid var(--line)}.runtime-option{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--text);text-decoration:none;transition:.18s ease}.runtime-option:hover{border-color:var(--primary);color:var(--text);transform:translateY(-2px)}.runtime-option>span{display:grid;justify-items:start;gap:5px}.runtime-option strong{font-size:17px}.runtime-option small{color:var(--muted)}.runtime-option b{color:var(--primary);font-size:20px}.runtime-swoole .runtime-badge,.runtime-swoole b{color:var(--cyan)}.runtime-swoole .runtime-badge{background:color-mix(in srgb,var(--cyan) 14%,transparent)}.runtime-swoole:hover{border-color:var(--cyan)}.empty{padding:34px;border:1px dashed var(--line);border-radius:16px;background:var(--surface);color:var(--muted);text-align:center}@media(max-width:680px){.shell{padding:38px 0}.date-card summary{align-items:flex-start;flex-direction:column;gap:9px}.date-meta{width:100%;white-space:normal}.date-meta b{margin-left:auto}.runtime-options{grid-template-columns:1fr}}
 .timeline{position:relative;padding-left:34px}.timeline::before{content:"";position:absolute;top:27px;bottom:27px;left:9px;width:2px;border-radius:999px;background:linear-gradient(var(--primary),color-mix(in srgb,var(--cyan) 50%,var(--line)),var(--line))}.timeline-empty{padding-left:0}.timeline-empty::before{display:none}.date-card{position:relative;overflow:visible}.date-card::before{content:"";position:absolute;z-index:2;top:23px;left:-31px;width:14px;height:14px;border:3px solid var(--page);border-radius:50%;background:var(--line);box-shadow:0 0 0 2px var(--line)}.date-card[open]::before{background:var(--primary);box-shadow:0 0 0 2px var(--primary),0 0 0 7px color-mix(in srgb,var(--primary) 12%,transparent)}.date-card:first-child::before{background:var(--cyan);box-shadow:0 0 0 2px var(--cyan),0 0 0 7px color-mix(in srgb,var(--cyan) 14%,transparent)}@media(max-width:680px){.timeline:not(.timeline-empty){padding-left:26px}.timeline::before{left:6px}.date-card::before{left:-26px}}
-.shell{width:min(1480px,calc(100% - 32px))}.combined-results{margin:0 14px 14px;padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}.combined-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:15px}.combined-heading h2{margin:0 0 3px;font-size:20px}.combined-heading p{margin:0;color:var(--muted);font-size:13px}.combined-heading>span{color:var(--muted);font-size:12px;font-weight:750;white-space:nowrap}.result-filters{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(3,minmax(150px,1fr)) auto;gap:10px;align-items:end;margin-bottom:14px}.result-filters label{display:grid;gap:5px;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.result-filters input,.result-filters select,.reset-filters{width:100%;min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);font:inherit;text-transform:none;letter-spacing:normal}.result-filters input:focus,.result-filters select:focus{outline:2px solid color-mix(in srgb,var(--primary) 35%,transparent);border-color:var(--primary)}.reset-filters{width:auto;cursor:pointer;font-weight:750}.reset-filters:hover{border-color:var(--primary);color:var(--primary)}.combined-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:11px;background:var(--surface)}.combined-table{width:100%;min-width:1160px;border-collapse:collapse;font-size:12px}.combined-table th,.combined-table td{padding:10px 11px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}.combined-table th{position:sticky;top:0;z-index:1;background:var(--surface-2)}.combined-table th:first-child,.combined-table th:nth-child(2),.combined-table td:first-child,.combined-table td:nth-child(2){text-align:left}.combined-table th button{display:inline-flex;align-items:center;gap:5px;padding:0;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:800;cursor:pointer}.combined-table th button::after{content:"↕";font-size:10px;opacity:.55}.combined-table th button[data-sort-direction="asc"]::after{content:"↑";opacity:1}.combined-table th button[data-sort-direction="desc"]::after{content:"↓";opacity:1}.combined-table tbody tr:hover{background:color-mix(in srgb,var(--primary) 6%,transparent)}.combined-table tbody tr:last-child td{border-bottom:0}.result-target{display:flex;align-items:center;gap:7px}.result-version,.result-traits span{display:inline-flex;padding:2px 6px;border:1px solid color-mix(in srgb,var(--cyan) 45%,var(--line));border-radius:999px;color:var(--cyan);font-size:9px;font-weight:800}.result-traits{display:flex;gap:5px;margin-top:4px}.result-traits span{border-color:var(--line);color:var(--muted)}.system-link{color:var(--primary);font-weight:750;text-decoration:none}.system-link:hover{text-decoration:underline}.empty-table{text-align:center!important;color:var(--muted)}[data-result-row][hidden]{display:none}@media(max-width:960px){.result-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.reset-filters{width:100%}}@media(max-width:600px){.combined-results{margin:0 8px 8px;padding:13px}.combined-heading{align-items:flex-start;flex-direction:column;gap:6px}.result-filters{grid-template-columns:1fr}.runtime-options{padding-left:8px;padding-right:8px}}
+.combined-option-wrap{padding:0 14px 14px}.combined-option{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 18px;border:1px solid color-mix(in srgb,var(--primary) 55%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--primary) 7%,var(--surface-2));color:var(--text);text-decoration:none;transition:.18s ease}.combined-option:hover{border-color:var(--primary);color:var(--text);transform:translateY(-2px)}.combined-option>span{display:grid;justify-items:start;gap:5px}.combined-option strong{font-size:17px}.combined-option small{color:var(--muted)}.combined-option b{color:var(--primary);font-size:20px}@media(max-width:680px){.combined-option-wrap{padding-left:8px;padding-right:8px}}
 </style>
 </head>
 <body>
@@ -407,14 +413,6 @@ final class BenchmarkHistory
 <script>
 document.querySelectorAll('time[data-local-date]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric'}).format(date)});
 document.querySelectorAll('time[data-local-time]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(date)});
-document.querySelectorAll('[data-combined-results]').forEach(section=>{
-    const table=section.querySelector('[data-combined-table]'),rows=[...table.querySelectorAll('[data-result-row]')],search=section.querySelector('[data-result-search]'),system=section.querySelector('[data-result-system]'),category=section.querySelector('[data-result-category]'),architecture=section.querySelector('[data-result-architecture]'),count=section.querySelector('[data-results-count]');
-    const applyFilters=()=>{const query=search.value.trim().toLowerCase();let shown=0;rows.forEach(row=>{const visible=(!query||row.dataset.filter.includes(query))&&(!system.value||row.dataset.system===system.value)&&(!category.value||row.dataset.category===category.value)&&(!architecture.value||row.dataset.architecture===architecture.value);row.hidden=!visible;if(visible)shown++});count.textContent=shown+(shown===1?' result':' results')+(shown===rows.length?'':' of '+rows.length)};
-    search.addEventListener('input',applyFilters);[system,category,architecture].forEach(control=>control.addEventListener('change',applyFilters));
-    section.querySelector('[data-reset-results]').addEventListener('click',()=>{search.value='';system.value='';category.value='';architecture.value='';applyFilters();search.focus()});
-    table.querySelectorAll('thead button[data-sort-type]').forEach((button,index)=>button.addEventListener('click',()=>{const type=button.dataset.sortType,previous=button.dataset.sortDirection,direction=previous?(previous==='asc'?'desc':'asc'):(type==='number'?'desc':'asc'),factor=direction==='asc'?1:-1;table.querySelectorAll('thead button').forEach(item=>{delete item.dataset.sortDirection;item.closest('th').removeAttribute('aria-sort')});button.dataset.sortDirection=direction;button.closest('th').setAttribute('aria-sort',direction==='asc'?'ascending':'descending');rows.sort((left,right)=>{const leftRaw=left.cells[index].dataset.sort||'',rightRaw=right.cells[index].dataset.sort||'';if(leftRaw===''&&rightRaw==='')return 0;if(leftRaw==='')return 1;if(rightRaw==='')return-1;const comparison=type==='number'?Number(leftRaw)-Number(rightRaw):leftRaw.localeCompare(rightRaw,undefined,{numeric:true,sensitivity:'base'});return comparison*factor});const body=table.tBodies[0];rows.forEach(row=>body.appendChild(row));applyFilters()}));
-    applyFilters();
-});
 </script>
 </body>
 </html>
@@ -423,13 +421,101 @@ HTML;
     }
 
     /**
+     * @param array<string, array{recordedAt:string, timestamp:int, runs:array<string, array{id:string, recordedAt:string, recordedAtDisplay:string, targets:int, path:string}>}> $dates
+     */
+    private function syncCombinedResultPages(string $archiveRoot, array $dates): void
+    {
+        $combinedRoot = $archiveRoot . '/combined';
+        if (is_dir($combinedRoot)) {
+            foreach (glob($combinedRoot . '/*', GLOB_ONLYDIR) ?: [] as $directory) {
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', basename($directory)) === 1
+                    && !array_key_exists(basename($directory), $dates)) {
+                    self::removeTree($directory);
+                }
+            }
+        }
+        if ($dates === []) {
+            if (is_dir($combinedRoot) && (scandir($combinedRoot) ?: []) === ['.', '..'] && !rmdir($combinedRoot)) {
+                throw new RuntimeException("Unable to delete empty combined results directory: {$combinedRoot}");
+            }
+            return;
+        }
+        if (!is_dir($combinedRoot) && !mkdir($combinedRoot, 0777, true) && !is_dir($combinedRoot)) {
+            throw new RuntimeException("Unable to create combined results directory: {$combinedRoot}");
+        }
+        foreach ($dates as $dateKey => $date) {
+            $directory = $combinedRoot . '/' . $dateKey;
+            if (!is_dir($directory) && !mkdir($directory, 0777, true) && !is_dir($directory)) {
+                throw new RuntimeException("Unable to create combined result directory: {$directory}");
+            }
+            $this->write(
+                $directory . '/index.html',
+                self::combinedResultsPage($date['runs'], $dateKey, $date['recordedAt']),
+            );
+        }
+    }
+
+    /**
      * @param array<string, array{id:string, recordedAt:string, recordedAtDisplay:string, targets:int, path:string}> $runs
      */
-    private static function combinedResultsSection(array $runs, string $dateKey): string
+    private static function combinedResultsPage(array $runs, string $dateKey, string $recordedAt): string
+    {
+        $date = self::dateTime($recordedAt);
+        $dateFallback = self::escape($date?->format('F j, Y') ?? $recordedAt);
+        $dateTime = self::escape($recordedAt);
+        $runtimeCount = count($runs);
+        $runtimeLabel = $runtimeCount === 1 ? '1 runtime system' : "{$runtimeCount} runtime systems";
+        $section = self::combinedResultsSection($runs, $dateKey, '../../');
+        $styles = self::combinedResultsStyles();
+        $script = self::combinedResultsScript();
+
+        return <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Combined PHP framework results · {$dateFallback}</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+<style>{$styles}</style>
+</head>
+<body>
+<main class="shell"><a class="back-link" href="../../">← Benchmark archive</a><div class="eyebrow">Cross-runtime comparison</div><h1>PHP framework performance</h1><p class="lead">Combined benchmark results for <time datetime="{$dateTime}" data-local-date>{$dateFallback}</time> across {$runtimeLabel}.</p>{$section}</main>
+<script>document.querySelectorAll('time[data-local-date]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric'}).format(date)});{$script}</script>
+</body>
+</html>
+HTML;
+    }
+
+    private static function combinedResultsStyles(): string
+    {
+        return ':root{color-scheme:light dark;--page:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6;--cyan:#0891b2;--shadow:rgba(30,41,59,.09)}@media(prefers-color-scheme:dark){:root{--page:#07111f;--surface:#0e1b2e;--surface-2:#132238;--text:#e8eef8;--muted:#98a9bf;--line:#283b55;--primary:#8b8cf8;--cyan:#22d3ee;--shadow:rgba(0,0,0,.28)}}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,rgba(91,91,214,.15),transparent 30rem),radial-gradient(circle at 95% 5%,rgba(8,145,178,.12),transparent 26rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}.shell{width:min(1480px,calc(100% - 32px));margin:auto;padding:48px 0}.back-link{display:inline-block;margin-bottom:28px;color:var(--muted);font-size:13px;font-weight:750;text-decoration:none}.back-link:hover{color:var(--primary)}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}h1{margin:8px 0;font-size:clamp(34px,6vw,54px);letter-spacing:-.045em}.lead{margin:0 0 30px;color:var(--muted);font-size:17px}.combined-results{padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 16px 44px var(--shadow)}.combined-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:15px}.combined-heading h2{margin:0 0 3px;font-size:20px}.combined-heading p{margin:0;color:var(--muted);font-size:13px}.combined-heading>span{color:var(--muted);font-size:12px;font-weight:750;white-space:nowrap}.result-filters{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(4,minmax(140px,1fr)) auto;gap:10px;align-items:end;margin-bottom:14px}.result-filters label{display:grid;gap:5px;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.result-filters input,.result-filters select,.reset-filters{width:100%;min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--text);font:inherit;text-transform:none;letter-spacing:normal}.result-filters input:focus,.result-filters select:focus{outline:2px solid color-mix(in srgb,var(--primary) 35%,transparent);border-color:var(--primary)}.reset-filters{width:auto;cursor:pointer;font-weight:750}.reset-filters:hover{border-color:var(--primary);color:var(--primary)}.combined-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:11px;background:var(--surface)}.combined-table{width:100%;min-width:1160px;border-collapse:collapse;font-size:12px}.combined-table th,.combined-table td{padding:10px 11px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}.combined-table th{position:sticky;top:0;z-index:1;background:var(--surface-2)}.combined-table th:first-child,.combined-table th:nth-child(2),.combined-table td:first-child,.combined-table td:nth-child(2){text-align:left}.combined-table th button{display:inline-flex;align-items:center;gap:5px;padding:0;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:800;cursor:pointer}.combined-table th button::after{content:"↕";font-size:10px;opacity:.55}.combined-table th button[data-sort-direction="asc"]::after{content:"↑";opacity:1}.combined-table th button[data-sort-direction="desc"]::after{content:"↓";opacity:1}.combined-table tbody tr:hover{background:color-mix(in srgb,var(--primary) 6%,transparent)}.combined-table tbody tr:last-child td{border-bottom:0}.result-target{display:flex;align-items:center;gap:7px}.result-version,.result-traits span{display:inline-flex;padding:2px 6px;border:1px solid color-mix(in srgb,var(--cyan) 45%,var(--line));border-radius:999px;color:var(--cyan);font-size:9px;font-weight:800}.result-traits{display:flex;gap:5px;margin-top:4px}.result-traits span{border-color:var(--line);color:var(--muted)}.system-link{color:var(--primary);font-weight:750;text-decoration:none}.system-link:hover{text-decoration:underline}.empty-table{text-align:center!important;color:var(--muted)}[data-result-row][hidden]{display:none}@media(max-width:960px){.result-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.reset-filters{width:100%}}@media(max-width:600px){.shell{padding:32px 0}.combined-results{padding:13px}.combined-heading{align-items:flex-start;flex-direction:column;gap:6px}.result-filters{grid-template-columns:1fr}}';
+    }
+
+    private static function combinedResultsScript(): string
+    {
+        return <<<'JS'
+document.querySelectorAll('[data-combined-results]').forEach(section=>{
+    const table=section.querySelector('[data-combined-table]'),rows=[...table.querySelectorAll('[data-result-row]')],search=section.querySelector('[data-result-search]'),system=section.querySelector('[data-result-system]'),category=section.querySelector('[data-result-category]'),style=section.querySelector('[data-result-style]'),component=section.querySelector('[data-result-component]'),count=section.querySelector('[data-results-count]');
+    const applyFilters=()=>{const query=search.value.trim().toLowerCase();let shown=0;rows.forEach(row=>{const visible=(!query||row.dataset.filter.includes(query))&&(!system.value||row.dataset.system===system.value)&&(!category.value||row.dataset.category===category.value)&&(!style.value||row.dataset.style===style.value)&&(!component.value||row.dataset.component===component.value);row.hidden=!visible;if(visible)shown++});count.textContent=shown+(shown===1?' result':' results')+(shown===rows.length?'':' of '+rows.length)};
+    search.addEventListener('input',applyFilters);[system,category,style,component].forEach(control=>control.addEventListener('change',applyFilters));
+    section.querySelector('[data-reset-results]').addEventListener('click',()=>{search.value='';system.value='';category.value='';style.value='';component.value='';applyFilters();search.focus()});
+    table.querySelectorAll('thead button[data-sort-type]').forEach((button,index)=>button.addEventListener('click',()=>{const type=button.dataset.sortType,previous=button.dataset.sortDirection,direction=previous?(previous==='asc'?'desc':'asc'):(type==='number'?'desc':'asc'),factor=direction==='asc'?1:-1;table.querySelectorAll('thead button').forEach(item=>{delete item.dataset.sortDirection;item.closest('th').removeAttribute('aria-sort')});button.dataset.sortDirection=direction;button.closest('th').setAttribute('aria-sort',direction==='asc'?'ascending':'descending');rows.sort((left,right)=>{const leftRaw=left.cells[index].dataset.sort||'',rightRaw=right.cells[index].dataset.sort||'';if(leftRaw===''&&rightRaw==='')return 0;if(leftRaw==='')return 1;if(rightRaw==='')return-1;const comparison=type==='number'?Number(leftRaw)-Number(rightRaw):leftRaw.localeCompare(rightRaw,undefined,{numeric:true,sensitivity:'base'});return comparison*factor});const body=table.tBodies[0];rows.forEach(row=>body.appendChild(row));applyFilters()}));
+    applyFilters();
+});
+JS;
+    }
+
+    /**
+     * @param array<string, array{id:string, recordedAt:string, recordedAtDisplay:string, targets:int, path:string}> $runs
+     */
+    private static function combinedResultsSection(array $runs, string $dateKey, string $runtimeLinkPrefix = ''): string
     {
         $rows = [];
         $categories = [];
-        $architectures = [];
+        $styles = [];
+        $componentOptions = [];
         foreach (self::RUNTIME_PROFILES as $profile => $metadata) {
             $entry = $runs[$profile] ?? null;
             if ($entry === null) {
@@ -442,14 +528,18 @@ HTML;
             }
             $versions = is_array($payload['versions'] ?? null) ? $payload['versions'] : [];
             $categoryMap = is_array($payload['categories'] ?? null) ? $payload['categories'] : [];
-            $architectureMap = is_array($payload['architectures'] ?? null) ? $payload['architectures'] : [];
+            $styleMap = is_array($payload['styles'] ?? null) ? $payload['styles'] : [];
+            $componentBasedMap = is_array($payload['componentBased'] ?? null) ? $payload['componentBased'] : [];
             foreach (self::results($payload) as $target => $result) {
                 if (!is_string($target) || !is_array($result)) {
                     continue;
                 }
                 $category = is_string($categoryMap[$target] ?? null) ? $categoryMap[$target] : 'unknown';
-                $architecture = is_string($architectureMap[$target] ?? null)
-                    ? $architectureMap[$target]
+                $style = is_string($styleMap[$target] ?? null)
+                    ? $styleMap[$target]
+                    : 'unknown';
+                $componentBased = is_string($componentBasedMap[$target] ?? null)
+                    ? $componentBasedMap[$target]
                     : 'unknown';
                 $categoryLabel = match ($category) {
                     'full-stack' => 'Full Stack',
@@ -458,14 +548,20 @@ HTML;
                     'baseline' => 'Baseline',
                     default => 'Unclassified',
                 };
-                $architectureLabel = match ($architecture) {
+                $styleLabel = match ($style) {
                     'mvc-hmvc' => 'MVC/HMVC',
-                    'component-based' => 'Component-based',
+                    'other' => 'Other',
                     'baseline' => 'Baseline',
                     default => 'Unclassified',
                 };
                 $categories[$category] = $categoryLabel;
-                $architectures[$architecture] = $architectureLabel;
+                $styles[$style] = $styleLabel;
+                $componentLabel = match ($componentBased) {
+                    'yes' => 'Yes',
+                    'no' => 'No',
+                    default => 'Unknown',
+                };
+                $componentOptions[$componentBased] = $componentLabel;
                 $stableRpm = self::numeric($result['stable']['req_per_min'] ?? null);
                 $peakRpm = self::numeric($result['peak']['req_per_min'] ?? null);
                 $rank = self::numeric($result['rank'] ?? null);
@@ -486,11 +582,13 @@ HTML;
                     'version' => $version,
                     'profile' => $profile,
                     'system' => $metadata['title'],
-                    'href' => $profile . '/' . $entry['id'] . '/dashboard.html',
+                    'href' => $runtimeLinkPrefix . $profile . '/' . $entry['id'] . '/dashboard.html',
                     'category' => $category,
                     'categoryLabel' => $categoryLabel,
-                    'architecture' => $architecture,
-                    'architectureLabel' => $architectureLabel,
+                    'style' => $style,
+                    'styleLabel' => $styleLabel,
+                    'componentBased' => $componentBased,
+                    'componentLabel' => $componentLabel,
                     'rank' => $rank,
                     'stableRpm' => $stableRpm,
                     'peakRpm' => $peakRpm,
@@ -529,15 +627,17 @@ HTML;
                 $row['version'],
                 $row['system'],
                 $row['categoryLabel'],
-                $row['architectureLabel'],
+                $row['styleLabel'],
+                $row['componentLabel'],
             ])));
             $body .= '<tr data-result-row data-filter="' . $filter . '" data-system="'
                 . self::escape($row['profile']) . '" data-category="' . self::escape($row['category'])
-                . '" data-architecture="' . self::escape($row['architecture']) . '" title="'
+                . '" data-style="' . self::escape($row['style']) . '" data-component="'
+                . self::escape($row['componentBased']) . '" title="'
                 . self::escape($row['diagnostic']) . '">'
                 . '<td data-sort="' . self::escape(strtolower($row['target'])) . '"><span class="result-target"><strong>'
                 . $target . '</strong>' . $version . '</span><span class="result-traits"><span>'
-                . self::escape($row['categoryLabel']) . '</span><span>' . self::escape($row['architectureLabel'])
+                . self::escape($row['categoryLabel']) . '</span><span>' . self::escape($row['styleLabel'])
                 . '</span></span></td>'
                 . '<td data-sort="' . self::escape(strtolower($row['system'])) . '"><a class="system-link" href="'
                 . self::escape($row['href']) . '">' . self::escape($row['system']) . '</a></td>'
@@ -564,7 +664,8 @@ HTML;
             }
         }
         $categoryOptions = self::combinedFilterOptions($categories);
-        $architectureOptions = self::combinedFilterOptions($architectures);
+        $styleOptions = self::combinedFilterOptions($styles);
+        $componentBasedOptions = self::combinedFilterOptions($componentOptions);
         $sectionId = 'results-' . (preg_replace('/[^a-zA-Z0-9_-]/', '-', $dateKey) ?? $dateKey);
 
         return '<section class="combined-results" data-combined-results id="' . self::escape($sectionId) . '">'
@@ -575,7 +676,8 @@ HTML;
             . '<label class="result-search"><span>Framework</span><input type="search" data-result-search placeholder="Search frameworks…"></label>'
             . '<label><span>System</span><select data-result-system><option value="">All systems</option>' . $systemOptions . '</select></label>'
             . '<label><span>Type</span><select data-result-category><option value="">All types</option>' . $categoryOptions . '</select></label>'
-            . '<label><span>Architecture</span><select data-result-architecture><option value="">All architectures</option>' . $architectureOptions . '</select></label>'
+            . '<label><span>Application style</span><select data-result-style><option value="">All styles</option>' . $styleOptions . '</select></label>'
+            . '<label><span>Component-based</span><select data-result-component><option value="">Either</option>' . $componentBasedOptions . '</select></label>'
             . '<button type="button" class="reset-filters" data-reset-results>Clear</button></div>'
             . '<div class="combined-table-wrap"><table class="combined-table" data-combined-table><thead><tr>'
             . self::combinedHeader('Target', 'string') . self::combinedHeader('System', 'string')

@@ -70,8 +70,12 @@ because it measures Laravel's API routing/JSON response path rather than its web
 route. `infbyte` measures the minimal skeleton, while `infbyte-full` installs
 every module advertised by the selected stable InfByte release. Dashboard
 classifications are defined in `frameworks/config`: Full Stack, Micro, or Route
-Only by framework type, and MVC/HMVC or Component-Based by architecture.
-The same configuration records whether each framework ships built-in DI and a
+Only by framework type, and MVC/HMVC or Other by application style. Application
+style is intentionally mutually exclusive and describes the integration used
+by this benchmark rather than every pattern a framework can support.
+Component-based delivery is a separate Yes/No capability: Yes means the project
+provides independently installable first-party Composer components. The same
+configuration records whether each framework ships built-in DI and a
 full-featured route dispatcher. Pure PHP remains a separate comparison baseline
 under every dashboard filter.
 
