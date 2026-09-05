@@ -349,12 +349,13 @@ final class BenchmarkHistory
         uasort($dates, static fn(array $left, array $right): int => $right['timestamp'] <=> $left['timestamp']);
 
         $cards = '';
-        foreach ($dates as $position => $date) {
+        $datePosition = 0;
+        foreach ($dates as $dateKey => $date) {
             $recordedAt = self::escape($date['recordedAt']);
             $fallbackDate = self::dateTime($date['recordedAt'])?->format('F j, Y') ?? $date['recordedAt'];
             $runtimeCount = count($date['runs']);
             $runtimeLabel = $runtimeCount === 1 ? '1 runtime report' : "{$runtimeCount} runtime reports";
-            $latest = $position === 0 ? '<span class="latest-badge">Latest</span>' : '';
+            $latest = $datePosition === 0 ? '<span class="latest-badge">Latest</span>' : '';
             $options = '';
             foreach (self::RUNTIME_PROFILES as $profile => $metadata) {
                 $entry = $date['runs'][$profile] ?? null;
@@ -373,11 +374,13 @@ final class BenchmarkHistory
                     . "<small>{$description} · {$targets} targets · <time datetime=\"{$time}\" data-local-time>{$timeFallback}</time></small></span>"
                     . '<b aria-hidden="true">→</b></a>';
             }
-            $open = $position === 0 ? ' open' : '';
+            $combinedResults = self::combinedResultsSection($date['runs'], $dateKey);
+            $open = $datePosition === 0 ? ' open' : '';
             $cards .= "<details class=\"date-card\"{$open}><summary><span><time datetime=\"{$recordedAt}\" data-local-date>"
                 . self::escape($fallbackDate)
                 . "</time></span><span class=\"date-meta\">{$latest}<span>{$runtimeLabel}</span><b aria-hidden=\"true\"></b></span></summary>"
-                . "<div class=\"runtime-options\">{$options}</div></details>";
+                . "<div class=\"runtime-options\">{$options}</div>{$combinedResults}</details>";
+            ++$datePosition;
         }
         $timelineClass = $cards === '' ? 'timeline timeline-empty' : 'timeline';
         if ($cards === '') {
@@ -396,15 +399,224 @@ final class BenchmarkHistory
 <style>
 :root{color-scheme:light dark;--page:#f4f7fb;--surface:#fff;--surface-2:#f8fafc;--text:#172033;--muted:#64748b;--line:#dce3ee;--primary:#5b5bd6;--cyan:#0891b2;--shadow:rgba(30,41,59,.09)}@media(prefers-color-scheme:dark){:root{--page:#07111f;--surface:#0e1b2e;--surface-2:#132238;--text:#e8eef8;--muted:#98a9bf;--line:#283b55;--primary:#8b8cf8;--cyan:#22d3ee;--shadow:rgba(0,0,0,.28)}}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 8% 0,rgba(91,91,214,.15),transparent 30rem),radial-gradient(circle at 95% 5%,rgba(8,145,178,.12),transparent 26rem),var(--page);color:var(--text);font-family:Inter,system-ui,sans-serif}.shell{width:min(980px,calc(100% - 32px));margin:auto;padding:64px 0}.eyebrow{color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}h1{margin:8px 0;font-size:clamp(34px,6vw,54px);letter-spacing:-.045em}.lead{max-width:760px;margin:0 0 30px;color:var(--muted);font-size:17px}.timeline{display:grid;gap:12px}.date-card{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:0 16px 44px var(--shadow)}.date-card[open]{border-color:color-mix(in srgb,var(--primary) 55%,var(--line))}.date-card summary{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:19px 21px;cursor:pointer;list-style:none;font-weight:850}.date-card summary::-webkit-details-marker{display:none}.date-meta{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13px;font-weight:700;white-space:nowrap}.date-meta b{width:10px;height:10px;border-right:2px solid var(--primary);border-bottom:2px solid var(--primary);transform:rotate(45deg);transition:transform .18s}.date-card[open] .date-meta b{transform:rotate(225deg)}.latest-badge,.runtime-badge{display:inline-flex;padding:3px 8px;border-radius:999px;background:color-mix(in srgb,var(--primary) 14%,transparent);color:var(--primary);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.05em}.runtime-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;padding:0 14px 14px;border-top:1px solid var(--line)}.runtime-option{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--text);text-decoration:none;transition:.18s ease}.runtime-option:hover{border-color:var(--primary);color:var(--text);transform:translateY(-2px)}.runtime-option>span{display:grid;justify-items:start;gap:5px}.runtime-option strong{font-size:17px}.runtime-option small{color:var(--muted)}.runtime-option b{color:var(--primary);font-size:20px}.runtime-swoole .runtime-badge,.runtime-swoole b{color:var(--cyan)}.runtime-swoole .runtime-badge{background:color-mix(in srgb,var(--cyan) 14%,transparent)}.runtime-swoole:hover{border-color:var(--cyan)}.empty{padding:34px;border:1px dashed var(--line);border-radius:16px;background:var(--surface);color:var(--muted);text-align:center}@media(max-width:680px){.shell{padding:38px 0}.date-card summary{align-items:flex-start;flex-direction:column;gap:9px}.date-meta{width:100%;white-space:normal}.date-meta b{margin-left:auto}.runtime-options{grid-template-columns:1fr}}
 .timeline{position:relative;padding-left:34px}.timeline::before{content:"";position:absolute;top:27px;bottom:27px;left:9px;width:2px;border-radius:999px;background:linear-gradient(var(--primary),color-mix(in srgb,var(--cyan) 50%,var(--line)),var(--line))}.timeline-empty{padding-left:0}.timeline-empty::before{display:none}.date-card{position:relative;overflow:visible}.date-card::before{content:"";position:absolute;z-index:2;top:23px;left:-31px;width:14px;height:14px;border:3px solid var(--page);border-radius:50%;background:var(--line);box-shadow:0 0 0 2px var(--line)}.date-card[open]::before{background:var(--primary);box-shadow:0 0 0 2px var(--primary),0 0 0 7px color-mix(in srgb,var(--primary) 12%,transparent)}.date-card:first-child::before{background:var(--cyan);box-shadow:0 0 0 2px var(--cyan),0 0 0 7px color-mix(in srgb,var(--cyan) 14%,transparent)}@media(max-width:680px){.timeline:not(.timeline-empty){padding-left:26px}.timeline::before{left:6px}.date-card::before{left:-26px}}
+.shell{width:min(1480px,calc(100% - 32px))}.combined-results{margin:0 14px 14px;padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}.combined-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:15px}.combined-heading h2{margin:0 0 3px;font-size:20px}.combined-heading p{margin:0;color:var(--muted);font-size:13px}.combined-heading>span{color:var(--muted);font-size:12px;font-weight:750;white-space:nowrap}.result-filters{display:grid;grid-template-columns:minmax(220px,1.5fr) repeat(3,minmax(150px,1fr)) auto;gap:10px;align-items:end;margin-bottom:14px}.result-filters label{display:grid;gap:5px;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.result-filters input,.result-filters select,.reset-filters{width:100%;min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);font:inherit;text-transform:none;letter-spacing:normal}.result-filters input:focus,.result-filters select:focus{outline:2px solid color-mix(in srgb,var(--primary) 35%,transparent);border-color:var(--primary)}.reset-filters{width:auto;cursor:pointer;font-weight:750}.reset-filters:hover{border-color:var(--primary);color:var(--primary)}.combined-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:11px;background:var(--surface)}.combined-table{width:100%;min-width:1160px;border-collapse:collapse;font-size:12px}.combined-table th,.combined-table td{padding:10px 11px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}.combined-table th{position:sticky;top:0;z-index:1;background:var(--surface-2)}.combined-table th:first-child,.combined-table th:nth-child(2),.combined-table td:first-child,.combined-table td:nth-child(2){text-align:left}.combined-table th button{display:inline-flex;align-items:center;gap:5px;padding:0;border:0;background:transparent;color:var(--muted);font:inherit;font-weight:800;cursor:pointer}.combined-table th button::after{content:"↕";font-size:10px;opacity:.55}.combined-table th button[data-sort-direction="asc"]::after{content:"↑";opacity:1}.combined-table th button[data-sort-direction="desc"]::after{content:"↓";opacity:1}.combined-table tbody tr:hover{background:color-mix(in srgb,var(--primary) 6%,transparent)}.combined-table tbody tr:last-child td{border-bottom:0}.result-target{display:flex;align-items:center;gap:7px}.result-version,.result-traits span{display:inline-flex;padding:2px 6px;border:1px solid color-mix(in srgb,var(--cyan) 45%,var(--line));border-radius:999px;color:var(--cyan);font-size:9px;font-weight:800}.result-traits{display:flex;gap:5px;margin-top:4px}.result-traits span{border-color:var(--line);color:var(--muted)}.system-link{color:var(--primary);font-weight:750;text-decoration:none}.system-link:hover{text-decoration:underline}.empty-table{text-align:center!important;color:var(--muted)}[data-result-row][hidden]{display:none}@media(max-width:960px){.result-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.reset-filters{width:100%}}@media(max-width:600px){.combined-results{margin:0 8px 8px;padding:13px}.combined-heading{align-items:flex-start;flex-direction:column;gap:6px}.result-filters{grid-template-columns:1fr}.runtime-options{padding-left:8px;padding-right:8px}}
 </style>
 </head>
 <body>
 <main class="shell"><div class="eyebrow">Benchmark report archive</div><h1>PHP framework performance</h1><p class="lead">Browse reports along the benchmark timeline, expand a date, then choose the execution model you want to inspect. Every runtime uses the same validation, route, concurrency, repetition, stability, latency, and telemetry procedure.</p><div class="{$timelineClass}">{$cards}</div></main>
-<script>document.querySelectorAll('time[data-local-date]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric'}).format(date)});document.querySelectorAll('time[data-local-time]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(date)})</script>
+<script>
+document.querySelectorAll('time[data-local-date]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'long',day:'numeric'}).format(date)});
+document.querySelectorAll('time[data-local-time]').forEach(element=>{const date=new Date(element.dateTime);if(Number.isNaN(date.getTime()))return;element.textContent=new Intl.DateTimeFormat(undefined,{hour:'numeric',minute:'2-digit',timeZoneName:'short'}).format(date)});
+document.querySelectorAll('[data-combined-results]').forEach(section=>{
+    const table=section.querySelector('[data-combined-table]'),rows=[...table.querySelectorAll('[data-result-row]')],search=section.querySelector('[data-result-search]'),system=section.querySelector('[data-result-system]'),category=section.querySelector('[data-result-category]'),architecture=section.querySelector('[data-result-architecture]'),count=section.querySelector('[data-results-count]');
+    const applyFilters=()=>{const query=search.value.trim().toLowerCase();let shown=0;rows.forEach(row=>{const visible=(!query||row.dataset.filter.includes(query))&&(!system.value||row.dataset.system===system.value)&&(!category.value||row.dataset.category===category.value)&&(!architecture.value||row.dataset.architecture===architecture.value);row.hidden=!visible;if(visible)shown++});count.textContent=shown+(shown===1?' result':' results')+(shown===rows.length?'':' of '+rows.length)};
+    search.addEventListener('input',applyFilters);[system,category,architecture].forEach(control=>control.addEventListener('change',applyFilters));
+    section.querySelector('[data-reset-results]').addEventListener('click',()=>{search.value='';system.value='';category.value='';architecture.value='';applyFilters();search.focus()});
+    table.querySelectorAll('thead button[data-sort-type]').forEach((button,index)=>button.addEventListener('click',()=>{const type=button.dataset.sortType,previous=button.dataset.sortDirection,direction=previous?(previous==='asc'?'desc':'asc'):(type==='number'?'desc':'asc'),factor=direction==='asc'?1:-1;table.querySelectorAll('thead button').forEach(item=>{delete item.dataset.sortDirection;item.closest('th').removeAttribute('aria-sort')});button.dataset.sortDirection=direction;button.closest('th').setAttribute('aria-sort',direction==='asc'?'ascending':'descending');rows.sort((left,right)=>{const leftRaw=left.cells[index].dataset.sort||'',rightRaw=right.cells[index].dataset.sort||'';if(leftRaw===''&&rightRaw==='')return 0;if(leftRaw==='')return 1;if(rightRaw==='')return-1;const comparison=type==='number'?Number(leftRaw)-Number(rightRaw):leftRaw.localeCompare(rightRaw,undefined,{numeric:true,sensitivity:'base'});return comparison*factor});const body=table.tBodies[0];rows.forEach(row=>body.appendChild(row));applyFilters()}));
+    applyFilters();
+});
+</script>
 </body>
 </html>
 HTML;
         $this->write($archiveRoot . '/index.html', $html);
+    }
+
+    /**
+     * @param array<string, array{id:string, recordedAt:string, recordedAtDisplay:string, targets:int, path:string}> $runs
+     */
+    private static function combinedResultsSection(array $runs, string $dateKey): string
+    {
+        $rows = [];
+        $categories = [];
+        $architectures = [];
+        foreach (self::RUNTIME_PROFILES as $profile => $metadata) {
+            $entry = $runs[$profile] ?? null;
+            if ($entry === null) {
+                continue;
+            }
+            try {
+                $payload = self::readPayloadFile($entry['path'] . '/results.json');
+            } catch (RuntimeException) {
+                continue;
+            }
+            $versions = is_array($payload['versions'] ?? null) ? $payload['versions'] : [];
+            $categoryMap = is_array($payload['categories'] ?? null) ? $payload['categories'] : [];
+            $architectureMap = is_array($payload['architectures'] ?? null) ? $payload['architectures'] : [];
+            foreach (self::results($payload) as $target => $result) {
+                if (!is_string($target) || !is_array($result)) {
+                    continue;
+                }
+                $category = is_string($categoryMap[$target] ?? null) ? $categoryMap[$target] : 'unknown';
+                $architecture = is_string($architectureMap[$target] ?? null)
+                    ? $architectureMap[$target]
+                    : 'unknown';
+                $categoryLabel = match ($category) {
+                    'full-stack' => 'Full Stack',
+                    'micro' => 'Micro',
+                    'route-only' => 'Route only',
+                    'baseline' => 'Baseline',
+                    default => 'Unclassified',
+                };
+                $architectureLabel = match ($architecture) {
+                    'mvc-hmvc' => 'MVC/HMVC',
+                    'component-based' => 'Component-based',
+                    'baseline' => 'Baseline',
+                    default => 'Unclassified',
+                };
+                $categories[$category] = $categoryLabel;
+                $architectures[$architecture] = $architectureLabel;
+                $stableRpm = self::numeric($result['stable']['req_per_min'] ?? null);
+                $peakRpm = self::numeric($result['peak']['req_per_min'] ?? null);
+                $rank = self::numeric($result['rank'] ?? null);
+                $peakConcurrency = self::numeric($result['peak']['concurrency'] ?? null);
+                $p50 = self::milliseconds($result['multiple']['p50'] ?? null);
+                $p99 = self::milliseconds($result['multiple']['p99'] ?? null);
+                $memory = self::numeric($result['remoteMemoryMB'] ?? null);
+                $serverMs = self::remoteMetric($result, 'server_execution_ms');
+                $files = self::remoteMetric($result, 'included_files');
+                $rankingStatus = is_string($result['rankingStatus'] ?? null)
+                    ? ucfirst(str_replace('-', ' ', $result['rankingStatus']))
+                    : 'Unavailable';
+                $failedRequests = self::numeric($result['multiple']['failed_requests'] ?? null) ?? 0.0;
+                $errorRate = self::percent($result['multiple']['error_rate'] ?? null) ?? 0.0;
+                $version = is_string($versions[$target] ?? null) ? trim($versions[$target]) : '';
+                $rows[] = [
+                    'target' => $target,
+                    'version' => $version,
+                    'profile' => $profile,
+                    'system' => $metadata['title'],
+                    'href' => $profile . '/' . $entry['id'] . '/dashboard.html',
+                    'category' => $category,
+                    'categoryLabel' => $categoryLabel,
+                    'architecture' => $architecture,
+                    'architectureLabel' => $architectureLabel,
+                    'rank' => $rank,
+                    'stableRpm' => $stableRpm,
+                    'peakRpm' => $peakRpm,
+                    'peakConcurrency' => $peakConcurrency,
+                    'p50' => $p50,
+                    'p99' => $p99,
+                    'memory' => $memory,
+                    'serverMs' => $serverMs,
+                    'files' => $files,
+                    'diagnostic' => sprintf(
+                        'Status: %s · Failed requests: %s · Error rate: %.3f%%',
+                        $rankingStatus,
+                        number_format($failedRequests, 0, '.', ','),
+                        $errorRate,
+                    ),
+                ];
+            }
+        }
+        usort($rows, static function (array $left, array $right): int {
+            $leftRpm = $left['stableRpm'] ?? -INF;
+            $rightRpm = $right['stableRpm'] ?? -INF;
+            $byRpm = $rightRpm <=> $leftRpm;
+            return $byRpm !== 0
+                ? $byRpm
+                : strcmp($left['target'] . $left['profile'], $right['target'] . $right['profile']);
+        });
+
+        $body = '';
+        foreach ($rows as $row) {
+            $target = self::escape($row['target']);
+            $version = $row['version'] === ''
+                ? ''
+                : '<span class="result-version">' . self::escape($row['version']) . '</span>';
+            $filter = self::escape(strtolower(implode(' ', [
+                $row['target'],
+                $row['version'],
+                $row['system'],
+                $row['categoryLabel'],
+                $row['architectureLabel'],
+            ])));
+            $body .= '<tr data-result-row data-filter="' . $filter . '" data-system="'
+                . self::escape($row['profile']) . '" data-category="' . self::escape($row['category'])
+                . '" data-architecture="' . self::escape($row['architecture']) . '" title="'
+                . self::escape($row['diagnostic']) . '">'
+                . '<td data-sort="' . self::escape(strtolower($row['target'])) . '"><span class="result-target"><strong>'
+                . $target . '</strong>' . $version . '</span><span class="result-traits"><span>'
+                . self::escape($row['categoryLabel']) . '</span><span>' . self::escape($row['architectureLabel'])
+                . '</span></span></td>'
+                . '<td data-sort="' . self::escape(strtolower($row['system'])) . '"><a class="system-link" href="'
+                . self::escape($row['href']) . '">' . self::escape($row['system']) . '</a></td>'
+                . self::combinedNumericCell($row['rank'], 0)
+                . self::combinedNumericCell($row['stableRpm'], 0)
+                . self::combinedNumericCell($row['peakRpm'], 0)
+                . self::combinedNumericCell($row['peakConcurrency'], 0)
+                . self::combinedNumericCell($row['p50'], 2)
+                . self::combinedNumericCell($row['p99'], 2)
+                . self::combinedNumericCell($row['memory'], 2)
+                . self::combinedNumericCell($row['serverMs'], 2)
+                . self::combinedNumericCell($row['files'], 0)
+                . '</tr>';
+        }
+        if ($body === '') {
+            $body = '<tr><td colspan="11" class="empty-table">No combined result data is available for this date.</td></tr>';
+        }
+
+        $systemOptions = '';
+        foreach (self::RUNTIME_PROFILES as $profile => $metadata) {
+            if (isset($runs[$profile])) {
+                $systemOptions .= '<option value="' . self::escape($profile) . '">'
+                    . self::escape($metadata['title']) . '</option>';
+            }
+        }
+        $categoryOptions = self::combinedFilterOptions($categories);
+        $architectureOptions = self::combinedFilterOptions($architectures);
+        $sectionId = 'results-' . (preg_replace('/[^a-zA-Z0-9_-]/', '-', $dateKey) ?? $dateKey);
+
+        return '<section class="combined-results" data-combined-results id="' . self::escape($sectionId) . '">'
+            . '<div class="combined-heading"><div><h2>Framework results</h2>'
+            . '<p>All runtime results for this date. Overall rank is calculated within each runtime.</p></div>'
+            . '<span data-results-count>' . count($rows) . ' results</span></div>'
+            . '<div class="result-filters">'
+            . '<label class="result-search"><span>Framework</span><input type="search" data-result-search placeholder="Search frameworks…"></label>'
+            . '<label><span>System</span><select data-result-system><option value="">All systems</option>' . $systemOptions . '</select></label>'
+            . '<label><span>Type</span><select data-result-category><option value="">All types</option>' . $categoryOptions . '</select></label>'
+            . '<label><span>Architecture</span><select data-result-architecture><option value="">All architectures</option>' . $architectureOptions . '</select></label>'
+            . '<button type="button" class="reset-filters" data-reset-results>Clear</button></div>'
+            . '<div class="combined-table-wrap"><table class="combined-table" data-combined-table><thead><tr>'
+            . self::combinedHeader('Target', 'string') . self::combinedHeader('System', 'string')
+            . self::combinedHeader('Overall rank', 'number') . self::combinedHeader('Stable RPM', 'number')
+            . self::combinedHeader('Peak RPM', 'number') . self::combinedHeader('Peak c', 'number')
+            . self::combinedHeader('p50 ms', 'number') . self::combinedHeader('p99 ms', 'number')
+            . self::combinedHeader('Memory MB', 'number') . self::combinedHeader('Server ms', 'number')
+            . self::combinedHeader('Files', 'number')
+            . '</tr></thead><tbody>' . $body . '</tbody></table></div></section>';
+    }
+
+    /** @param array<string, string> $options */
+    private static function combinedFilterOptions(array $options): string
+    {
+        asort($options, SORT_NATURAL | SORT_FLAG_CASE);
+        $html = '';
+        foreach ($options as $value => $label) {
+            $html .= '<option value="' . self::escape($value) . '">' . self::escape($label) . '</option>';
+        }
+        return $html;
+    }
+
+    private static function combinedHeader(string $label, string $type): string
+    {
+        return '<th><button type="button" data-sort-type="' . self::escape($type) . '">'
+            . self::escape($label) . '</button></th>';
+    }
+
+    private static function combinedNumericCell(mixed $value, int $decimals): string
+    {
+        $numeric = self::numeric($value);
+        if ($numeric === null) {
+            return '<td data-sort="">—</td>';
+        }
+        return '<td data-sort="' . self::escape((string) $numeric) . '">'
+            . number_format($numeric, $decimals, '.', ',') . '</td>';
+    }
+
+    private static function numeric(mixed $value): ?float
+    {
+        return is_int($value) || is_float($value) ? (float) $value : null;
     }
 
     private function runtimeProfile(): ?string
