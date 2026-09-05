@@ -655,6 +655,10 @@ final class PhpFrameworksBenchManager
                 throw new RuntimeException('Docker started, but its runtime URL could not be recorded');
             }
             $this->waitForHttp($baseUrl . '/libs/php_config.php');
+            $runtimeSuite = new PhpFrameworksBenchSuite($this->suite->getProjectDirectory(), $baseUrl);
+            foreach ($runtimeSuite->configs($runtimeSuite->targetsForRuntime($runtime)) as $config) {
+                $this->waitForHttp($config->getUrl());
+            }
         }
 
         return $results;
