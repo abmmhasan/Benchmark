@@ -1291,8 +1291,24 @@ namespace {
         && str_contains($infbytePersistentWorker, 'new Nyholm\\Psr7\\Response(')
         && str_contains($webrickPersistentWorker, 'new Nyholm\\Psr7\\Response(')
         && str_contains($infbytePersistentWorker, "uri: 'http://127.0.0.1' . \$incoming->uri()")
-        && str_contains($webrickPersistentWorker, "uri: 'http://127.0.0.1' . \$incoming->uri()"),
-        'RoadRunner receives PSR-7 responses and Workerman creates absolute normalized requests',
+        && str_contains($webrickPersistentWorker, "uri: 'http://127.0.0.1' . \$incoming->uri()")
+        && str_contains($infbytePersistentWorker, "strcasecmp(\$header, 'Content-Length')")
+        && str_contains($webrickPersistentWorker, "strcasecmp(\$header, 'Content-Length')"),
+        'persistent bridges normalize RoadRunner responses and Workerman requests and response lengths',
+    );
+    $frameworkManagerSource = file_get_contents(dirname(__DIR__) . '/src/PhpFrameworksBenchManager.php');
+    $assert(
+        is_string($frameworkManagerSource)
+        && str_contains(
+            $frameworkManagerSource,
+            '$runtimeSuite = new PhpFrameworksBenchSuite($this->suite->getProjectDirectory(), $baseUrl);',
+        )
+        && str_contains(
+            $frameworkManagerSource,
+            'foreach ($runtimeSuite->configs($runtimeSuite->targetsForRuntime($runtime)) as $config)',
+        )
+        && str_contains($frameworkManagerSource, '$this->waitForHttp($config->getUrl());'),
+        'Docker startup waits until every target in the selected runtime is reachable',
     );
     $assert(
         !is_dir($bundledSuiteDirectory . '/lumen')

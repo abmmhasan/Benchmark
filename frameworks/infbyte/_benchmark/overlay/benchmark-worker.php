@@ -127,9 +127,15 @@ if ($driver === 'workerman') {
                 uri: 'http://127.0.0.1' . $incoming->uri(),
             );
             $response = $handle($request);
+            $headers = $response->getHeaders();
+            foreach (array_keys($headers) as $header) {
+                if (strcasecmp($header, 'Content-Length') === 0) {
+                    unset($headers[$header]);
+                }
+            }
             $connection->send(new Workerman\Protocols\Http\Response(
                 $response->getStatusCode(),
-                $response->getHeaders(),
+                $headers,
                 (string) $response->getBody(),
             ));
         } catch (Throwable $exception) {
