@@ -82,8 +82,13 @@ jobs:
         if: always()
         run: |
           if [[ -f frameworks/.benchmark-server.json ]]; then
-            composer benchmark:frameworks -- docker-stop
+            composer benchmark:frameworks -- docker-stop \
+              || docker rm --force ${{ matrix.container }} 2>/dev/null \
+              || true
+          else
+            docker rm --force ${{ matrix.container }} 2>/dev/null || true
           fi
+          rm -f frameworks/.benchmark-server.json
 
       - name: Package runtime report
         run: tar -cf benchmark-${{ matrix.runtime }}.tar -C docs ${{ matrix.runtime }}

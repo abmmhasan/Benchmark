@@ -888,6 +888,7 @@ namespace {
             && in_array($suiteDirectory . ':/app/frameworks:rw', $swooleDockerPlan[1]['command'], true)
             && in_array($suiteDirectory . ':' . $suiteDirectory . ':rw', $swooleDockerPlan[1]['command'], true)
             && in_array('--user', $swooleDockerPlan[1]['command'], true)
+            && !in_array('--rm', $swooleDockerPlan[1]['command'], true)
             && $swooleDockerPlan[2]['command'] === ['docker', 'port', 'benchmark-frameworks-swoole', '9500/tcp'],
             'Docker Swoole uses an ephemeral loopback port and persistent-worker mount',
         );
@@ -903,13 +904,14 @@ namespace {
             $assert(
                 $runtimePlan[0]['status'] === 'dry-run'
                 && in_array("127.0.0.1::{$containerPort}", $runtimePlan[1]['command'], true)
+                && !in_array('--user', $runtimePlan[1]['command'], true)
                 && $runtimePlan[2]['command'] === ['docker', 'port', $container, "{$containerPort}/tcp"],
                 "Docker {$runtime} runtime dispatch supports dry-run and an ephemeral loopback port",
             );
         }
         $dockerStopPlan = $frameworkManager->stopDockerApache(dryRun: true);
         $assert(
-            $dockerStopPlan['command'] === ['docker', 'stop', 'benchmark-frameworks-apache']
+            $dockerStopPlan['command'] === ['docker', 'rm', '--force', 'benchmark-frameworks-apache']
             && $dockerStopPlan['status'] === 'dry-run',
             'Docker Apache stop command supports dry-run',
         );
@@ -1262,8 +1264,35 @@ namespace {
         && str_contains($workflowSource, '--output=docs/${{ matrix.runtime }}')
         && str_contains($workflowSource, 'actions/upload-artifact@v7')
         && str_contains($workflowSource, 'actions/download-artifact@v7')
-        && str_contains($workflowSource, 'archive-index --output=docs'),
+        && str_contains($workflowSource, 'archive-index --output=docs')
+        && str_contains($workflowSource, 'docker rm --force ${{ matrix.container }}')
+        && str_contains($workflowSource, 'rm -f frameworks/.benchmark-server.json'),
         'the automated workflow runs six parallel runtime suites, exposes errors, and merges their archives',
+    );
+    $frankenPhpConfig = file_get_contents($bundledSuiteDirectory . '/.docker/frankenphp/Caddyfile');
+    $persistentGateway = file_get_contents($bundledSuiteDirectory . '/.docker/persistent/nginx.conf');
+    $assert(
+        is_string($frankenPhpConfig)
+        && substr_count($frankenPhpConfig, 'match /*') === 5
+        && is_string($persistentGateway)
+        && str_contains($persistentGateway, 'proxy_set_header Host 127.0.0.1;')
+        && !str_contains($persistentGateway, 'proxy_set_header Host $http_host;'),
+        'persistent runtime gateways route every worker request and use a deterministic upstream host',
+    );
+    $infbytePersistentWorker = file_get_contents(
+        $bundledSuiteDirectory . '/infbyte/_benchmark/overlay/benchmark-worker.php',
+    );
+    $webrickPersistentWorker = file_get_contents(
+        $bundledSuiteDirectory . '/_support/webrick/benchmark-worker.php',
+    );
+    $assert(
+        is_string($infbytePersistentWorker)
+        && is_string($webrickPersistentWorker)
+        && str_contains($infbytePersistentWorker, 'new Nyholm\\Psr7\\Response(')
+        && str_contains($webrickPersistentWorker, 'new Nyholm\\Psr7\\Response(')
+        && str_contains($infbytePersistentWorker, "uri: 'http://127.0.0.1' . \$incoming->uri()")
+        && str_contains($webrickPersistentWorker, "uri: 'http://127.0.0.1' . \$incoming->uri()"),
+        'RoadRunner receives PSR-7 responses and Workerman creates absolute normalized requests',
     );
     $assert(
         !is_dir($bundledSuiteDirectory . '/lumen')
@@ -1280,6 +1309,16 @@ namespace {
     $assert(
         is_file($bundledSuiteDirectory . '/cakephp/_benchmark/overlay/.htaccess'),
         'CakePHP setup disables the scaffold rewrite that loops on direct front-controller URLs',
+    );
+    $cakePhpFrontController = file_get_contents(
+        $bundledSuiteDirectory . '/cakephp/_benchmark/overlay/webroot/index.php',
+    );
+    $assert(
+        is_string($cakePhpFrontController)
+        && str_contains($cakePhpFrontController, '$response = $server->run();')
+        && str_contains($cakePhpFrontController, '$response->withStringBody(')
+        && !str_contains($cakePhpFrontController, "require dirname(__DIR__, 3) . '/libs/output_data.php';"),
+        'CakePHP appends benchmark telemetry before FastCGI emits the response',
     );
     $flightFrontController = file_get_contents(
         $bundledSuiteDirectory . '/flight/_benchmark/overlay/public/index.php',
