@@ -1565,12 +1565,14 @@ namespace {
     $docsIndex = file_get_contents(dirname(__DIR__) . '/docs/index.html');
     $assert(
         is_string($docsIndex)
-        && str_contains($docsIndex, 'class="timeline timeline-empty"')
+        && str_contains($docsIndex, 'Benchmark report archive')
         && str_contains($docsIndex, '.timeline::before')
-        && str_contains($docsIndex, 'No benchmark reports are available yet')
         && !str_contains($docsIndex, 'id="runtime"')
-        && str_contains($docsIndex, 'same validation, route, concurrency, repetition, stability, latency, and telemetry procedure'),
-        'the empty Pages entry point provides the combined benchmark history timeline',
+        && str_contains($docsIndex, 'same validation, route, concurrency, repetition, stability, latency, and telemetry procedure')
+        && str_contains($docsIndex, 'data-combined-results')
+        && str_contains($docsIndex, 'class="timeline timeline-empty"')
+        && str_contains($docsIndex, 'No benchmark reports are available yet'),
+        'the empty Pages entry point retains the combined benchmark timeline behavior',
     );
     $combinedHistoryDirectory = sys_get_temp_dir() . '/benchmark-combined-history-' . bin2hex(random_bytes(8));
     mkdir($combinedHistoryDirectory . '/opcache', 0777, true);
@@ -1592,6 +1594,8 @@ namespace {
     $assert(
         is_string($combinedHistoryIndex)
         && substr_count($combinedHistoryIndex, '<details class="date-card"') === 1
+        && str_contains($combinedHistoryIndex, '<details class="date-card" open>')
+        && str_contains($combinedHistoryIndex, 'class="latest-badge">Latest</span>')
         && str_contains($combinedHistoryIndex, '2 runtime reports')
         && str_contains($combinedHistoryIndex, 'class="runtime-option runtime-opcache"')
         && str_contains($combinedHistoryIndex, 'class="runtime-option runtime-swoole"')
@@ -1599,11 +1603,22 @@ namespace {
         && str_contains($combinedHistoryIndex, 'swoole/' . basename($swooleArchive) . '/dashboard.html')
         && str_contains($combinedHistoryIndex, 'data-local-date')
         && str_contains($combinedHistoryIndex, '.date-card::before')
+        && substr_count($combinedHistoryIndex, 'data-combined-results') >= 1
+        && substr_count($combinedHistoryIndex, '<tr data-result-row') === 2
+        && str_contains($combinedHistoryIndex, 'data-system="opcache"')
+        && str_contains($combinedHistoryIndex, 'data-system="swoole"')
+        && str_contains($combinedHistoryIndex, '<option value="opcache">OPcache + Apache</option>')
+        && str_contains($combinedHistoryIndex, '<option value="swoole">Swoole</option>')
+        && str_contains($combinedHistoryIndex, 'data-result-search')
+        && str_contains($combinedHistoryIndex, 'data-result-category')
+        && str_contains($combinedHistoryIndex, 'data-result-architecture')
+        && str_contains($combinedHistoryIndex, 'data-reset-results')
+        && str_contains($combinedHistoryIndex, 'data-sort-type="string">System')
         && !is_file($combinedHistoryDirectory . '/opcache/index.html')
         && !is_file($combinedHistoryDirectory . '/swoole/index.html')
         && is_string($combinedDashboard)
         && str_contains($combinedDashboard, 'href="../../" aria-label="Back to benchmark archive"'),
-        'runtime histories merge by date into a timeline with direct dashboard choices and a single-level return path',
+        'runtime histories merge by date into a timeline with direct dashboards, combined filterable results, and a single-level return path',
     );
     $opcacheHistory->deleteAll(true);
     $swooleHistory->deleteAll(true);
