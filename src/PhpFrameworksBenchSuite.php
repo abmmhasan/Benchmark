@@ -149,14 +149,26 @@ final class PhpFrameworksBenchSuite
     }
 
     /**
-     * Return dashboard architecture slugs keyed by target name.
+     * Return dashboard application-style slugs keyed by target name.
      *
      * @param list<string> $targets Empty means every available target.
      * @return array<string, string>
      */
-    public function architectures(array $targets = []): array
+    public function styles(array $targets = []): array
     {
-        return $this->classifications('framework_architectures', $targets);
+        return $this->classifications('framework_styles', $targets);
+    }
+
+    /**
+     * Return whether each target is delivered as independently installable
+     * first-party Composer components.
+     *
+     * @param list<string> $targets Empty means every available target.
+     * @return array<string, string>
+     */
+    public function componentBased(array $targets = []): array
+    {
+        return $this->binaryClassifications('framework_component_based', $targets);
     }
 
     /**

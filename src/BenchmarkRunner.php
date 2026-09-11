@@ -483,7 +483,10 @@ final class BenchmarkRunner
             'container' => self::combineContainerStats($containerStats),
             'configuration' => $this->configurationMetadata($config, $levels, $safeWarmUp),
             'rankingStatus' => $rankingStatus,
-            'score' => $stable === null ? null : (float) $stable['req_per_min'],
+            // Every validated target receives an overall rank. The status keeps
+            // unstable or single-repetition observations distinguishable from
+            // sustainable measurements without discarding their result.
+            'score' => (float) $multiple['req_per_min'],
         ];
     }
 
@@ -935,13 +938,13 @@ final class BenchmarkRunner
         $resourceRows = [];
         $remoteMetricRows = [];
         foreach ($data as $name => $result) {
-            $stable = $result['stable'];
             $peak = $result['peak'];
             $summaryRows[] = [
                 $result['rank'],
                 $name,
-                self::displayNumber($stable['req_per_min'] ?? null, 0),
-                $stable['concurrency'] ?? null,
+                self::displayNumber($result['multiple']['req_per_min'] ?? null, 0),
+                $result['multiple']['concurrency'] ?? null,
+                ucfirst((string) ($result['rankingStatus'] ?? 'unknown')),
                 self::displayNumber($peak['req_per_min'], 0),
                 $peak['concurrency'],
                 ucfirst($peak['rpm_stability']),
@@ -1086,12 +1089,13 @@ final class BenchmarkRunner
         }
 
         $sections = [
-            self::markdownTable('Sustainable ranking',
+            self::markdownTable('Overall ranking',
                 [
                     'Rank',
                     'Target',
-                    'Best stable RPM',
-                    'Stable concurrency',
+                    'Ranked RPM',
+                    'Ranked concurrency',
+                    'Ranking stability',
                     'Peak observed RPM',
                     'Peak concurrency',
                     'Peak stability',
@@ -1421,6 +1425,9 @@ final class BenchmarkRunner
         foreach ($data as $name => $result) {
             $metrics = [
                 'rank' => $result['rank'],
+                'rankedRPM' => $result['multiple']['req_per_min'] ?? null,
+                'rankedConcurrency' => $result['multiple']['concurrency'] ?? null,
+                'rankingStatus' => $result['rankingStatus'] ?? null,
                 'stableRPM' => $result['stable']['req_per_min'] ?? null,
                 'stableConcurrency' => $result['stable']['concurrency'] ?? null,
                 'peakObservedRPM' => $result['peak']['req_per_min'],

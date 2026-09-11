@@ -558,7 +558,7 @@ try {
 
     if (!flag($options, 'no-archive')) {
         $payload = [
-            'schemaVersion' => 4,
+            'schemaVersion' => 5,
             'loadGenerator' => 'php-curl-multi',
             'runtimeProfile' => $runtime,
             'suiteDirectory' => $suite->getProjectDirectory(),
@@ -568,7 +568,8 @@ try {
             'runtimes' => array_fill_keys($targetNames, $runtime),
             'runtimeCapabilities' => $suite->runtimes($targetNames),
             'categories' => $suite->categories($targetNames),
-            'architectures' => $suite->architectures($targetNames),
+            'styles' => $suite->styles($targetNames),
+            'componentBased' => $suite->componentBased($targetNames),
             'builtInDi' => $suite->builtInDi($targetNames),
             'fullFeaturedRouteDispatchers' => $suite->fullFeaturedRouteDispatchers($targetNames),
             'versions' => $frameworkVersions,

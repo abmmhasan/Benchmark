@@ -387,8 +387,8 @@ namespace {
     $toMarkdownTable = new ReflectionMethod($perConfigRunner, 'toMarkdownTable');
     $markdown = $toMarkdownTable->invoke($perConfigRunner, $results);
     $assert(
-        str_contains($markdown, '## Sustainable ranking'),
-        'Markdown output has a sustainable ranking group',
+        str_contains($markdown, '## Overall ranking'),
+        'Markdown output has an overall ranking group',
     );
     $assert(
         str_contains($markdown, '## Throughput — concurrency 2')
@@ -427,21 +427,22 @@ namespace {
         str_contains($markdown, 'Run 1 RPM') && str_contains($markdown, 'Run 2 RPM'),
         'per-run RPM remains visible',
     );
-    preg_match('/## Sustainable ranking\R\R(?<table>.*?)(?=\R\R## )/s', $markdown, $summaryMatch);
+    preg_match('/## Overall ranking\R\R(?<table>.*?)(?=\R\R## )/s', $markdown, $summaryMatch);
     $assert(
         !str_contains($summaryMatch['table'] ?? '', 'RPS')
         && !str_contains($summaryMatch['table'] ?? '', 'p99'),
         'ranking does not repeat detailed throughput or latency fields',
     );
     $assert(
-        str_contains($summaryMatch['table'] ?? '', 'Best stable RPM')
+        str_contains($summaryMatch['table'] ?? '', 'Ranked RPM')
+        && str_contains($summaryMatch['table'] ?? '', 'Ranking stability')
         && str_contains($summaryMatch['table'] ?? '', 'Peak observed RPM'),
-        'ranking distinguishes sustainable throughput from an observed peak',
+        'ranking distinguishes the selected throughput and stability from an observed peak',
     );
 
     $groupData = ['slow' => $result, 'fast' => $result];
     $groupData['slow']['name'] = 'slow';
-    $groupData['slow']['rank'] = 2;
+    $groupData['slow']['rank'] = 3;
     $groupData['slow']['score'] = 100.0;
     $groupData['slow']['stable']['req_per_min'] = 100.0;
     $groupData['slow']['stable']['concurrency'] = 2;
@@ -453,7 +454,7 @@ namespace {
     $groupData['slow']['single']['p50'] = 0.04;
     $groupData['slow']['single']['error_rate'] = 0.0;
     $groupData['fast']['name'] = 'fast';
-    $groupData['fast']['rank'] = 1;
+    $groupData['fast']['rank'] = 2;
     $groupData['fast']['score'] = 200.0;
     $groupData['fast']['stable']['req_per_min'] = 200.0;
     $groupData['fast']['stable']['concurrency'] = 2;
@@ -466,9 +467,12 @@ namespace {
     $groupData['fast']['single']['error_rate'] = 0.1;
     $groupData['unsteady'] = $result;
     $groupData['unsteady']['name'] = 'unsteady';
-    $groupData['unsteady']['rank'] = null;
-    $groupData['unsteady']['score'] = null;
+    $groupData['unsteady']['rank'] = 1;
+    $groupData['unsteady']['score'] = 400.0;
     $groupData['unsteady']['stable'] = null;
+    $groupData['unsteady']['multiple']['req_per_min'] = 400.0;
+    $groupData['unsteady']['multiple']['concurrency'] = 4;
+    $groupData['unsteady']['rankingStatus'] = 'unstable';
     $groupData['unsteady']['peak']['req_per_min'] = 400.0;
     $groupData['unsteady']['peak']['concurrency'] = 4;
     $groupData['unsteady']['peak']['rpm_stability'] = 'unstable';
@@ -486,7 +490,7 @@ namespace {
     );
     $comparisonMarkdown = $toMarkdownTable->invoke($perConfigRunner, $groupData);
     $assert(
-        str_contains($comparisonMarkdown, '| Setting | fast | slow | unsteady |'),
+        str_contains($comparisonMarkdown, '| Setting | unsteady | fast | slow |'),
         'target-specific configuration follows overall benchmark rank',
     );
     $assert(!str_contains($comparisonMarkdown, '| Recorded at |'), 'timestamps are not presented as configuration');
@@ -522,25 +526,28 @@ namespace {
     $appearsBefore = static fn(string $table, string $first, string $second): bool =>
         strpos($table, "| {$first} |") < strpos($table, "| {$second} |");
     $assert(
-        $appearsBefore($tableSection($comparisonMarkdown, 'Sustainable ranking'), 'fast', 'slow')
-        && $appearsBefore($tableSection($comparisonMarkdown, 'Sustainable ranking'), 'slow', 'unsteady'),
-        'stable targets rank by sustainable RPM before targets with only unstable observations',
+        $appearsBefore($tableSection($comparisonMarkdown, 'Overall ranking'), 'unsteady', 'fast')
+        && $appearsBefore($tableSection($comparisonMarkdown, 'Overall ranking'), 'fast', 'slow'),
+        'all targets rank by selected RPM regardless of stability classification',
     );
     $assert(
         str_contains(
-            $tableSection($comparisonMarkdown, 'Sustainable ranking'),
-            '| — | unsteady | — | — | 400 | 4 | Unstable |',
+            $tableSection($comparisonMarkdown, 'Overall ranking'),
+            '| 1 | unsteady | 400 | 4 | Unstable | 400 | 4 | Unstable |',
         ),
-        'an unstable peak remains visible without receiving a sustainable rank',
+        'an unstable observation remains ranked with an explicit stability flag',
     );
     $flatten = new ReflectionMethod($perConfigRunner, 'flatten');
     [, $flatRows] = $flatten->invoke($perConfigRunner, $groupData);
     $flatMetrics = array_column($flatRows, 0);
     $assert(
-        in_array('stableRPM', $flatMetrics, true)
+        in_array('rankedRPM', $flatMetrics, true)
+        && in_array('rankedConcurrency', $flatMetrics, true)
+        && in_array('rankingStatus', $flatMetrics, true)
+        && in_array('stableRPM', $flatMetrics, true)
         && in_array('peakObservedRPM', $flatMetrics, true)
         && in_array('peakObservedStability', $flatMetrics, true),
-        'flat reports expose stable and observed-peak measurements explicitly',
+        'flat reports expose ranked, stable, and observed-peak measurements explicitly',
     );
     $assert(
         $appearsBefore($tableSection($comparisonMarkdown, 'Throughput — concurrency 2'), 'slow', 'fast'),
@@ -610,11 +617,11 @@ namespace {
         1.0,
     );
     $assert(
-        $inconclusive['score'] === null
+        $inconclusive['score'] === (float) $inconclusive['multiple']['req_per_min']
         && $inconclusive['stable'] === null
         && $inconclusive['peak'] === $inconclusive['multiple']
         && $inconclusive['rankingStatus'] === 'unstable',
-        'a target with no stable concurrency keeps its observed peak without receiving a rank',
+        'a target with no stable concurrency remains rankable and explicitly unstable',
     );
     $unverified = $aggregateConfig->invoke(
         $stabilityRunner,
@@ -626,10 +633,10 @@ namespace {
         1.0,
     );
     $assert(
-        $unverified['score'] === null
+        $unverified['score'] === (float) $unverified['multiple']['req_per_min']
         && $unverified['stable'] === null
         && $unverified['rankingStatus'] === 'unverified',
-        'a one-repetition observation remains visible without being treated as stable',
+        'a one-repetition observation remains rankable without being treated as stable',
     );
 
     $unit = UnitBenchmark::run(static function (): int {
@@ -668,7 +675,8 @@ namespace {
         . "frameworks_list=\"\nalpha\nbeta\n\"\n"
         . "framework_runtimes=\"\nalpha:opcache\nbeta:both\n\"\n"
         . "framework_categories=\"\nalpha:full-stack\nbeta:micro\n\"\n"
-        . "framework_architectures=\"\nalpha:component-based\nbeta:mvc-hmvc\n\"\n"
+        . "framework_styles=\"\nalpha:other\nbeta:mvc-hmvc\n\"\n"
+        . "framework_component_based=\"\nalpha:yes\nbeta:no\n\"\n"
         . "framework_built_in_di=\"\nalpha:yes\nbeta:no\n\"\n"
         . "framework_full_featured_route_dispatchers=\"\nalpha:yes\nbeta:yes\n\"\n"
         . "framework_version_packages=\"\nalpha:vendor/alpha\nbeta:vendor/beta\n\"\n",
@@ -732,9 +740,14 @@ namespace {
             'framework categories are imported and retain target selection',
         );
         $assert(
-            $frameworkSuite->architectures() === ['alpha' => 'component-based', 'beta' => 'mvc-hmvc']
-            && $frameworkSuite->architectures(['alpha']) === ['alpha' => 'component-based'],
-            'framework architectures are imported and retain target selection',
+            $frameworkSuite->styles() === ['alpha' => 'other', 'beta' => 'mvc-hmvc']
+            && $frameworkSuite->styles(['alpha']) === ['alpha' => 'other'],
+            'framework application styles are imported and retain target selection',
+        );
+        $assert(
+            $frameworkSuite->componentBased() === ['alpha' => 'yes', 'beta' => 'no']
+            && $frameworkSuite->componentBased(['beta']) === ['beta' => 'no'],
+            'component-based capabilities are imported and retain target selection',
         );
         $assert(
             $frameworkSuite->builtInDi() === ['alpha' => 'yes', 'beta' => 'no']
@@ -1006,29 +1019,54 @@ namespace {
         'bundled framework categories cover full-stack, micro, route-only, and baseline targets',
     );
     $assert(
-        $bundledSuite->architectures() === [
+        $bundledSuite->styles() === [
             'cakephp' => 'mvc-hmvc',
             'codeigniter' => 'mvc-hmvc',
             'fatfree' => 'mvc-hmvc',
-            'fast-route' => 'component-based',
-            'flight' => 'component-based',
-            'hyperf' => 'component-based',
-            'infbyte' => 'component-based',
-            'infbyte-full' => 'component-based',
+            'fast-route' => 'other',
+            'flight' => 'other',
+            'hyperf' => 'mvc-hmvc',
+            'infbyte' => 'mvc-hmvc',
+            'infbyte-full' => 'mvc-hmvc',
             'kumbia' => 'mvc-hmvc',
             'laravel' => 'mvc-hmvc',
             'laravel-api' => 'mvc-hmvc',
-            'leaf' => 'component-based',
-            'nette' => 'component-based',
+            'leaf' => 'other',
+            'nette' => 'mvc-hmvc',
             'pure-php' => 'baseline',
-            'slim' => 'component-based',
-            'symfony' => 'component-based',
-            'webrick-sharded' => 'component-based',
-            'webrick-fused' => 'component-based',
-            'webrick-generated' => 'component-based',
+            'slim' => 'other',
+            'symfony' => 'mvc-hmvc',
+            'webrick-sharded' => 'other',
+            'webrick-fused' => 'other',
+            'webrick-generated' => 'other',
             'yii-basic' => 'mvc-hmvc',
         ],
-        'bundled framework architectures cover MVC/HMVC, component-based, and baseline targets',
+        'bundled framework styles cover mutually exclusive MVC/HMVC, other, and baseline targets',
+    );
+    $assert(
+        $bundledSuite->componentBased() === [
+            'cakephp' => 'yes',
+            'codeigniter' => 'no',
+            'fatfree' => 'no',
+            'fast-route' => 'yes',
+            'flight' => 'no',
+            'hyperf' => 'yes',
+            'infbyte' => 'yes',
+            'infbyte-full' => 'yes',
+            'kumbia' => 'no',
+            'laravel' => 'yes',
+            'laravel-api' => 'yes',
+            'leaf' => 'yes',
+            'nette' => 'yes',
+            'pure-php' => 'no',
+            'slim' => 'yes',
+            'symfony' => 'yes',
+            'webrick-sharded' => 'yes',
+            'webrick-fused' => 'yes',
+            'webrick-generated' => 'yes',
+            'yii-basic' => 'no',
+        ],
+        'bundled component-based capabilities are explicit and independent of application style',
     );
     $assert(
         $bundledSuite->builtInDi() === [
@@ -1456,7 +1494,8 @@ namespace {
         'recordedAt' => '2026-06-10T08:15:00+00:00',
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
-        'architectures' => ['test' => 'component-based'],
+        'styles' => ['test' => 'other'],
+        'componentBased' => ['test' => 'yes'],
         'builtInDi' => ['test' => 'yes'],
         'fullFeaturedRouteDispatchers' => ['test' => 'yes'],
         'versions' => ['test' => 'v3.2.1'],
@@ -1467,7 +1506,8 @@ namespace {
         'recordedAt' => '2026-07-10T12:30:00+00:00',
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
-        'architectures' => ['test' => 'component-based'],
+        'styles' => ['test' => 'other'],
+        'componentBased' => ['test' => 'yes'],
         'builtInDi' => ['test' => 'yes'],
         'fullFeaturedRouteDispatchers' => ['test' => 'yes'],
         'versions' => ['test' => 'v3.2.1'],
@@ -1512,22 +1552,27 @@ namespace {
         && str_contains($dashboard, '<svg viewBox="0 0 24 24"')
         && !str_contains($dashboard, '>Report menu</button>')
         && str_contains($dashboard, 'Sustainable leaders')
-        && str_contains($dashboard, 'id="architecture-filter"')
+        && str_contains($dashboard, 'id="style-filter"')
+        && str_contains($dashboard, 'Application style')
+        && str_contains($dashboard, 'id="component-filter"')
+        && str_contains($dashboard, 'Component-based')
         && str_contains($dashboard, 'id="di-filter"')
         && str_contains($dashboard, 'id="route-dispatcher-filter"')
         && str_contains($dashboard, "placeholder:'Any scope'")
-        && str_contains($dashboard, "placeholder:'Any architecture'")
+        && str_contains($dashboard, "placeholder:'Any style'")
         && str_contains($dashboard, '`All frameworks: ${filter.label(values[0])}`')
         && str_contains($dashboard, 'id="clear-filters"')
         && str_contains($dashboard, 'Pure PHP baseline')
         && str_contains($dashboard, 'data-category="full-stack"')
         && str_contains($dashboard, 'data-category="route-only"')
         && str_contains($dashboard, "allowed:['full-stack','micro','route-only']")
+        && str_contains($dashboard, "allowed:['mvc-hmvc','other']")
         && str_contains($dashboard, 'data-legend-category')
         && str_contains($dashboard, "entry.category==='baseline'")
         && str_contains($dashboard, 'decorateTargetCells')
         && str_contains($dashboard, 'categoryMap')
-        && str_contains($dashboard, 'architectureMap')
+        && str_contains($dashboard, 'styleMap')
+        && str_contains($dashboard, 'componentBasedMap')
         && str_contains($dashboard, 'builtInDiMap')
         && str_contains($dashboard, 'routeDispatcherMap')
         && str_contains($dashboard, "entry.category==='baseline'||filterDefinitions.every")
@@ -1537,6 +1582,10 @@ namespace {
         && str_contains($dashboard, 'badge-version')
         && str_contains($dashboard, 'v3.2.1')
         && str_contains($dashboard, 'diagnosticTitle')
+        && str_contains($dashboard, 'Ranked RPM')
+        && str_contains($dashboard, 'addRankedRpmCell')
+        && str_contains($dashboard, 'ranked target')
+        && str_contains($dashboard, 'Their observed RPM contributes to overall rank')
         && str_contains($dashboard, 'target-name-line')
         && !str_contains($dashboard, '>Status</button>')
         && !str_contains($dashboard, '>Failed</button>')
@@ -1552,7 +1601,9 @@ namespace {
         && str_contains($dashboard, 'Swoole · persistent worker')
         && str_contains($dashboard, 'serverRuntimeExtensionVersion')
         && str_contains($dashboard, "['Full Stack',entry=>entry.category==='full-stack']")
-        && str_contains($dashboard, "['MVC/HMVC',entry=>entry.architecture==='mvc-hmvc']")
+        && str_contains($dashboard, "['MVC/HMVC',entry=>entry.style==='mvc-hmvc']")
+        && str_contains($dashboard, "['Other',entry=>entry.style==='other']")
+        && !str_contains($dashboard, 'architecture-filter')
         && str_contains($dashboard, 'server_execution_ms')
         && str_contains($dashboard, 'Measured router patterns')
         && str_contains($dashboard, 'id="route-pattern-table"')
@@ -1569,7 +1620,7 @@ namespace {
         && str_contains($docsIndex, '.timeline::before')
         && !str_contains($docsIndex, 'id="runtime"')
         && str_contains($docsIndex, 'same validation, route, concurrency, repetition, stability, latency, and telemetry procedure')
-        && str_contains($docsIndex, 'data-combined-results')
+        && !str_contains($docsIndex, 'data-combined-results')
         && str_contains($docsIndex, 'class="timeline timeline-empty"')
         && str_contains($docsIndex, 'No benchmark reports are available yet'),
         'the empty Pages entry point retains the combined benchmark timeline behavior',
@@ -1582,14 +1633,28 @@ namespace {
     $opcacheArchive = $opcacheHistory->save([
         'recordedAt' => '2026-08-01T01:00:00+00:00',
         'runtimeProfile' => 'opcache',
+        'categories' => ['test' => 'full-stack'],
+        'styles' => ['test' => 'other'],
+        'componentBased' => ['test' => 'yes'],
         'results' => ['test' => $historyResult],
     ], '# OPcache');
+    $unstableHistoryResult = $historyResult;
+    $unstableHistoryResult['rank'] = 1;
+    $unstableHistoryResult['score'] = 123_456.0;
+    $unstableHistoryResult['stable'] = null;
+    $unstableHistoryResult['multiple']['req_per_min'] = 123_456.0;
+    $unstableHistoryResult['rankingStatus'] = 'unstable';
     $swooleArchive = $swooleHistory->save([
         'recordedAt' => '2026-08-01T01:15:00+00:00',
         'runtimeProfile' => 'swoole',
-        'results' => ['test' => $historyResult],
+        'categories' => ['test' => 'full-stack'],
+        'styles' => ['test' => 'other'],
+        'componentBased' => ['test' => 'yes'],
+        'results' => ['test' => $unstableHistoryResult],
     ], '# Swoole');
     $combinedHistoryIndex = file_get_contents($combinedHistoryDirectory . '/index.html');
+    $combinedResultsPagePath = $combinedHistoryDirectory . '/combined/2026-08-01/index.html';
+    $combinedResultsPage = file_get_contents($combinedResultsPagePath);
     $combinedDashboard = file_get_contents($opcacheArchive . '/dashboard.html');
     $assert(
         is_string($combinedHistoryIndex)
@@ -1603,25 +1668,45 @@ namespace {
         && str_contains($combinedHistoryIndex, 'swoole/' . basename($swooleArchive) . '/dashboard.html')
         && str_contains($combinedHistoryIndex, 'data-local-date')
         && str_contains($combinedHistoryIndex, '.date-card::before')
-        && substr_count($combinedHistoryIndex, 'data-combined-results') >= 1
-        && substr_count($combinedHistoryIndex, '<tr data-result-row') === 2
-        && str_contains($combinedHistoryIndex, 'data-system="opcache"')
-        && str_contains($combinedHistoryIndex, 'data-system="swoole"')
-        && str_contains($combinedHistoryIndex, '<option value="opcache">OPcache + Apache</option>')
-        && str_contains($combinedHistoryIndex, '<option value="swoole">Swoole</option>')
-        && str_contains($combinedHistoryIndex, 'data-result-search')
-        && str_contains($combinedHistoryIndex, 'data-result-category')
-        && str_contains($combinedHistoryIndex, 'data-result-architecture')
-        && str_contains($combinedHistoryIndex, 'data-reset-results')
-        && str_contains($combinedHistoryIndex, 'data-sort-type="string">System')
+        && str_contains($combinedHistoryIndex, 'class="combined-option" href="combined/2026-08-01/index.html"')
+        && str_contains($combinedHistoryIndex, 'Compare framework results')
+        && !str_contains($combinedHistoryIndex, 'data-combined-results')
+        && !str_contains($combinedHistoryIndex, '<tr data-result-row')
+        && is_string($combinedResultsPage)
+        && str_contains($combinedResultsPage, 'href="../../">← Benchmark archive</a>')
+        && str_contains($combinedResultsPage, 'Cross-runtime comparison')
+        && substr_count($combinedResultsPage, '<tr data-result-row') === 2
+        && str_contains($combinedResultsPage, 'data-system="opcache"')
+        && str_contains($combinedResultsPage, 'data-system="swoole"')
+        && str_contains($combinedResultsPage, '<option value="opcache">OPcache + Apache</option>')
+        && str_contains($combinedResultsPage, '<option value="swoole">Swoole</option>')
+        && str_contains($combinedResultsPage, 'data-result-search')
+        && str_contains($combinedResultsPage, 'data-result-category')
+        && str_contains($combinedResultsPage, 'data-result-style')
+        && str_contains($combinedResultsPage, '<option value="other">Other</option>')
+        && str_contains($combinedResultsPage, 'All styles')
+        && str_contains($combinedResultsPage, 'data-result-component')
+        && str_contains($combinedResultsPage, '<option value="yes">Yes</option>')
+        && str_contains($combinedResultsPage, 'Component-based')
+        && !str_contains($combinedResultsPage, 'All architectures')
+        && str_contains($combinedResultsPage, 'data-reset-results')
+        && str_contains($combinedResultsPage, 'data-sort-type="string">System')
+        && str_contains($combinedResultsPage, 'data-sort-type="number">Ranked RPM')
+        && str_contains($combinedResultsPage, '>123,456 <span class="result-version" title="Ranked result with a stability warning">Unstable</span></td>')
+        && str_contains($combinedResultsPage, '../../opcache/' . basename($opcacheArchive) . '/dashboard.html')
+        && str_contains($combinedResultsPage, '../../swoole/' . basename($swooleArchive) . '/dashboard.html')
         && !is_file($combinedHistoryDirectory . '/opcache/index.html')
         && !is_file($combinedHistoryDirectory . '/swoole/index.html')
         && is_string($combinedDashboard)
         && str_contains($combinedDashboard, 'href="../../" aria-label="Back to benchmark archive"'),
-        'runtime histories merge by date into a timeline with direct dashboards, combined filterable results, and a single-level return path',
+        'runtime histories merge by date into a timeline linking a dedicated filterable comparison page with correct return paths',
     );
     $opcacheHistory->deleteAll(true);
     $swooleHistory->deleteAll(true);
+    $assert(
+        !is_dir($combinedHistoryDirectory . '/combined'),
+        'removing all dated runs also removes generated combined comparison pages',
+    );
     rmdir($combinedHistoryDirectory . '/opcache');
     rmdir($combinedHistoryDirectory . '/swoole');
     unlink($combinedHistoryDirectory . '/index.html');
@@ -1635,7 +1720,8 @@ namespace {
         'recordedAt' => '2026-07-20T12:30:00+00:00',
         'targetServer' => $targetServerEnvironment,
         'categories' => ['test' => 'full-stack'],
-        'architectures' => ['test' => 'component-based'],
+        'styles' => ['test' => 'other'],
+        'componentBased' => ['test' => 'yes'],
         'builtInDi' => ['test' => 'yes'],
         'fullFeaturedRouteDispatchers' => ['test' => 'yes'],
         'versions' => ['test' => 'v3.2.1'],

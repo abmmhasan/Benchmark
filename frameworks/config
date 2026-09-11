@@ -80,28 +80,55 @@ webrick-generated:route-only
 yii-basic:full-stack
 "
 
-# Architectural style used for dashboard filtering and leader comparisons.
-framework_architectures="
+# Application style used for dashboard filtering and leader comparisons.
+# This is intentionally mutually exclusive and describes the integration used
+# by this benchmark rather than every pattern a framework can support.
+framework_styles="
 cakephp:mvc-hmvc
 codeigniter:mvc-hmvc
 fatfree:mvc-hmvc
-fast-route:component-based
-flight:component-based
-hyperf:component-based
-infbyte:component-based
-infbyte-full:component-based
+fast-route:other
+flight:other
+hyperf:mvc-hmvc
+infbyte:mvc-hmvc
+infbyte-full:mvc-hmvc
 kumbia:mvc-hmvc
 laravel:mvc-hmvc
 laravel-api:mvc-hmvc
-leaf:component-based
-nette:component-based
+leaf:other
+nette:mvc-hmvc
 pure-php:baseline
-slim:component-based
-symfony:component-based
-webrick-sharded:component-based
-webrick-fused:component-based
-webrick-generated:component-based
+slim:other
+symfony:mvc-hmvc
+webrick-sharded:other
+webrick-fused:other
+webrick-generated:other
 yii-basic:mvc-hmvc
+"
+
+# Independently installable first-party Composer components. This capability is
+# orthogonal to application style, so an MVC/HMVC framework can also be "yes".
+framework_component_based="
+cakephp:yes
+codeigniter:no
+fatfree:no
+fast-route:yes
+flight:no
+hyperf:yes
+infbyte:yes
+infbyte-full:yes
+kumbia:no
+laravel:yes
+laravel-api:yes
+leaf:yes
+nette:yes
+pure-php:no
+slim:yes
+symfony:yes
+webrick-sharded:yes
+webrick-fused:yes
+webrick-generated:yes
+yii-basic:no
 "
 
 # First-party dependency injection or service-container support. A container
